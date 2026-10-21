@@ -433,6 +433,16 @@ def memory_block() -> str:
 # claim she had no axe right after the player put one in her inventory.
 INVENTORY_PATH = BASE_DIR.parent / "config" / "laya-inventory.json"
 _INVENTORY_SECTIONS = ("hotbar", "storage", "tools", "backpack", "utility", "armor")
+GEAR_QUESTION_RE = re.compile(
+    r"\b(inventory|pack|weapon|armor|shield|pickaxe|hatchet|sword|axe|axes|"
+    r"battleaxe|carrying|carry|holding|hold|held|hand|hands|equipped|"
+    r"equipment|gear|wield|wielding|pork|food|item)\b",
+    re.IGNORECASE,
+)
+
+
+def asks_about_gear(message: str) -> bool:
+    return bool(GEAR_QUESTION_RE.search(message or ""))
 
 
 def friendly_item_name(item_id: str) -> str:
@@ -471,7 +481,7 @@ def inventory_block() -> str:
             "carries and can use):\n" + "\n".join(lines))
 
 
-def gear_block(state: dict) -> str:
+def gear_block(state: dict, include_appearance: bool = False) -> str:
     """Render the live held item / armor / appearance from the plugin snapshot.
 
     This is deliberately separate from the pack dump: the held slot and the
@@ -503,7 +513,7 @@ def gear_block(state: dict) -> str:
         pieces.append(f"offhand: {friendly_item_name(offhand)}")
 
     appearance = str(laya.get("appearance") or "").strip()
-    if appearance:
+    if include_appearance and appearance:
         pieces.append(f"appearance: {appearance}")
 
     if not pieces:
@@ -2653,22 +2663,38 @@ async def run_chat(player: str, message: str, state: dict, with_audio: bool,
     if knowledge:
         parts.append("Game knowledge (from Hytale's own data):\n" + "\n".join(f"- {k}" for k in knowledge))
     inv = ""
-    if re.search(
-            r"\b(inventory|pack|weapon|armor|shield|pickaxe|hatchet|sword|axe|axes|"
-            r"battleaxe|carrying|carry|holding|hold|held|hand|hands|equipped|"
-            r"equipment|gear|wield|wielding|pork|food|item)\b",
-            (message or "").lower()):
+    if asks_about_gear(message):
         inv = inventory_block()
     if inv:
         parts.append(inv)
-    gear = gear_block(state)
-    if gear:
-        parts.append(gear)
+    laya_state = (state or {}).get("laya") or {}
+    appearance = ""
+    if isinstance(laya_state, dict):
+        appearance = str(laya_state.get("appearance") or "").strip()
+    appearance_question = bool(re.search(
+        r"\b(hairstyle|haircut|hair|appearance|outfit|clothes|wearing|dress|look)\b",
+        (message or "").lower()))
+    if asks_about_gear(message) or appearance_question:
+        gear = gear_block(state, include_appearance=appearance_question)
+        if gear:
+            parts.append(gear)
+    if appearance_question and appearance:
+        parts.append(
+            "The player is asking about Laya's appearance. The authoritative "
+            "appearance above is the answer: reply directly and in character about "
+            "that hair/outfit. Do not say you cannot see, do not talk about trusting "
+            "a description, and do not give a generic companion line."
+        )
     parts.append(
         "Use the live equipment/appearance line above for any question about "
         "what Laya is holding, wearing, or looks like; do not deny or contradict "
-        "it. If the player says they see something, treat that observation as "
-        "true and respond to it naturally even when you have no vision line."
+        "it. Do not mention Laya's held item, armor, or appearance unless the "
+        "player asks about it or it is directly relevant to their instruction. "
+        "Answer the player's current message first; do not drag in earlier "
+        "topics or gear from the previous conversation unless they are relevant "
+        "to what the player just said. If the player says they see something, "
+        "treat that observation as true and respond to it naturally even when "
+        "you have no vision line."
     )
     parts.append(f"Game state: {state_json}\n{player or 'Player'} says: {message}\nLaya:")
     prompt = "\n\n".join(parts)
