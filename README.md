@@ -42,7 +42,8 @@ fallback.
    environment variables, so restart Hytale once after the first install.
 5. In game, talk to Laya in chat or use `/laya`.
 
-See [INSTALL.md](INSTALL.md) for details, manual setup, and troubleshooting.
+See [INSTALL.md](INSTALL.md) for details, manual setup, troubleshooting, and
+`reset-data.ps1` for a clean inventory/memory/appearance.
 
 ## How it works
 

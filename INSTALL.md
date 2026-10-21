@@ -114,13 +114,12 @@ For a completely fresh character, delete those files while Hytale is closed.
 
 ## Reset for a new character
 
-Close Hytale and the bridge, then delete:
+Close Hytale and the bridge, then run:
 
-```text
-config\laya-inventory.json
-config\laya-skin.json
-config\laya-combat.json
-logs\laya-memory.json
+```powershell
+.\reset-data.ps1
 ```
 
-The next launch creates clean defaults.
+This deletes `config\laya-inventory.json`, `config\laya-skin.json`,
+`config\laya-combat.json`, and `logs\laya-memory.json`. Your API keys in
+`config\bridge-config.json` are kept. The next launch creates clean defaults.
