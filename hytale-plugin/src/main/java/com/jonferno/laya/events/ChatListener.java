@@ -55,7 +55,7 @@ public class ChatListener {
             try {
                 URI uri = URI.create(AI_BRIDGE_URL);
                 HttpRequest request = HttpRequest.newBuilder(uri)
-                    .timeout(Duration.ofSeconds(20))
+                    .timeout(Duration.ofSeconds(60))
                     .version(HttpClient.Version.HTTP_1_1)
                     .header("Content-Type", "application/json; charset=UTF-8")
                     .header("Accept", "application/json")

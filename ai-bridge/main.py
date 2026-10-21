@@ -1448,7 +1448,7 @@ VISION_TRIGGERS = (
     "look at this", "look at that", "look here", "look around", "take a look",
     "look through my eyes", "look through", "through my eyes", "see through my eyes",
     "see what i see", "look where i'm looking", "look where im looking",
-    "look at me", "look at yourself", "look at your", "how do i look",
+    "look at me", "look at yourself", "how do i look",
     "see this", "see that", "can you see", "do you see", "what do you see",
     "what's this", "what is this", "what's that", "what is that",
     "does this look", "does that look", "how does this look", "how does that look",

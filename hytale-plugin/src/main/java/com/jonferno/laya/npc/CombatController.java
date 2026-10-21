@@ -240,6 +240,8 @@ class CombatController {
     private long nextSwingMs = 0;
     /** Bridge-supplied target words for an explicit attack ("kill those pigs"). */
     private volatile String attackHint = null;
+    /** Bridge-thread request to draw the best carried weapon for attack/defend. */
+    private volatile boolean drawWeaponPending = false;
 
     /** Bridge-thread "stop/follow/stay/defend/move_to" request, consumed on the world tick. */
     private volatile boolean cancelPending = false;
@@ -402,6 +404,9 @@ class CombatController {
             // the actual clear to the tick so target state stays single-writer.
             stanceReleasePending = true;
         }
+        // A spoken attack/defend order must visibly ready the weapon even when there
+        // is no target yet. The tick owns inventory writes, so defer the draw.
+        drawWeaponPending = "attack".equals(stance) || "defend".equals(stance);
         resetHpWarnings();
         LayaPlugin.log("Combat: stance=" + stance + " (" + source + ")");
     }
@@ -493,6 +498,14 @@ class CombatController {
             ensureWeaponEquipped(now);
         }
         if (owner.layaRef == null || owner.worldStore == null) return;
+
+        // A spoken attack/defend order readies the best carried weapon immediately,
+        // even when no enemy is in range yet. The bridge thread only sets the flag;
+        // inventory writes stay here on the world thread.
+        if (drawWeaponPending) {
+            drawWeaponPending = false;
+            ensureWeaponEquipped(now);
+        }
 
         // (1) A live reactive stamp becomes the target (any stance; spec section 2).
         maybeTakeReactive(now, playerPos, layaPos);
