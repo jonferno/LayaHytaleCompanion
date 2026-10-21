@@ -77,6 +77,12 @@ message. Exact numbers depend on the provider, GPU, and whether vision is used.
 ### Quick start
 
 1. Clone or download this repository.
+
+   ```powershell
+   git clone https://github.com/jonferno/LayaHytaleCompanion.git
+   cd LayaHytaleCompanion
+   ```
+
 2. Double-click `install.bat`, or run:
 
    ```powershell
