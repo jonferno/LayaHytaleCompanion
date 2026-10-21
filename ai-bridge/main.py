@@ -463,10 +463,20 @@ GEAR_QUESTION_RE = re.compile(
     r"equipment|gear|wield|wielding|pork|food|item)\b",
     re.IGNORECASE,
 )
+EQUIP_WEAPON_RE = re.compile(
+    r"\b(wield|equip|draw|ready|switch|swap|take out|bring out)\b"
+    r"[^.!?]{0,40}\b(battleaxe|axe|sword|weapon|shield|blade)\b",
+    re.IGNORECASE,
+)
 
 
 def asks_about_gear(message: str) -> bool:
     return bool(GEAR_QUESTION_RE.search(message or ""))
+
+
+def wants_equip_weapon(message: str) -> bool:
+    """True for an explicit request to ready/switch to a carried weapon."""
+    return bool(EQUIP_WEAPON_RE.search(message or ""))
 
 
 def friendly_item_name(item_id: str) -> str:
@@ -2831,6 +2841,13 @@ async def run_chat(player: str, message: str, state: dict, with_audio: bool,
         if (say_line or "").strip() != ack:
             log(f"Guard: task ack replaces model line -> {ack}")
         say_line = ack
+
+    # "Wield/switch to your battleaxe" is an equipment order even without the
+    # word defend. The plugin treats defend as the guarded weapon-ready stance.
+    if action != "stop_task" and wants_equip_weapon(message):
+        if action != "defend":
+            log(f"Guard: weapon equip cue -> action={action} -> defend")
+        action = "defend"
 
     # Cycle 12: explicit stance commands are deterministic. The model used to
     # answer "follow me" with stay (or stay put after "follow me"); the raw
