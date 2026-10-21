@@ -168,3 +168,10 @@ Plugin and bridge code by [Jonferno](https://github.com/jonferno). Built with
 Hytale's plugin API, [laya.cpp](https://github.com/lkarlslund/laya.cpp),
 FastAPI, Kokoro, Parakeet, and the Hytale modding community. See each upstream
 project for its license.
+
+### 100% vibe coded
+
+This project was **100% vibe coded** with
+[DeepSeek V4.1](https://www.deepseek.com/) and
+[OpenCode](https://opencode.ai/). Huge thanks to both - they made building
+Laya an absolute joy.
