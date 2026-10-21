@@ -1,0 +1,29 @@
+# Local / generated data
+models/
+ai-bridge/laya/
+logs/
+config/bridge-config.json
+config/laya-skin.json
+config/laya-inventory.json
+config/laya-combat.json
+.claude/
+.superpowers/
+.idea/
+.vscode/
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Build output
+hytale-plugin/build/
+hytale-plugin/.gradle/
+hytale-plugin/backups/
+*.class
+*.jar
+!dist/LayaPlugin-*.jar
+
+# Local archives / secrets
+*.zip
+*.log
+.env

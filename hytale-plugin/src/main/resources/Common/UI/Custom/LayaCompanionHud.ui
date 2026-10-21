@@ -1,0 +1,160 @@
+Group {
+  LayoutMode: Left;
+  Anchor: (Bottom: 40, Height: 110);
+
+  Group #Panel {
+    Anchor: (Left: 15, Width: 320, Height: 110);
+    Background: #345068(0.95);
+    Padding: (Full: 3);
+    LayoutMode: Left;
+
+    Group #PanelInner {
+      Anchor: (Width: 314, Height: 104);
+      Background: #303F53(0.88);
+      Padding: (Full: 8);
+      LayoutMode: Left;
+
+      Group #Portrait {
+        Anchor: (Width: 88, Height: 88, Right: 10, Top: 0);
+        Background: #1A2030(0.75);
+
+        ProgressBar #IconFollow {
+          Anchor: (Width: 56, Height: 56, Left: 16, Top: 16);
+          BarTexturePath: "LayaIcons/IconFollow.png";
+          Value: 1.0;
+        }
+
+        ProgressBar #IconAttack {
+          Anchor: (Width: 56, Height: 56, Left: 16, Top: 16);
+          BarTexturePath: "LayaIcons/IconAttack.png";
+          Value: 0.0;
+        }
+
+        ProgressBar #IconDefend {
+          Anchor: (Width: 56, Height: 56, Left: 16, Top: 16);
+          BarTexturePath: "LayaIcons/IconDefend.png";
+          Value: 0.0;
+        }
+
+        ProgressBar #IconMine {
+          Anchor: (Width: 56, Height: 56, Left: 16, Top: 16);
+          BarTexturePath: "LayaIcons/IconMine.png";
+          Value: 0.0;
+        }
+
+        ProgressBar #IconChop {
+          Anchor: (Width: 56, Height: 56, Left: 16, Top: 16);
+          BarTexturePath: "LayaIcons/IconChop.png";
+          Value: 0.0;
+        }
+
+        ProgressBar #IconGather {
+          Anchor: (Width: 56, Height: 56, Left: 16, Top: 16);
+          BarTexturePath: "LayaIcons/IconGather.png";
+          Value: 0.0;
+        }
+
+        ProgressBar #IconStay {
+          Anchor: (Width: 56, Height: 56, Left: 16, Top: 16);
+          BarTexturePath: "LayaIcons/IconStay.png";
+          Value: 0.0;
+        }
+
+        ProgressBar #IconDowned {
+          Anchor: (Width: 56, Height: 56, Left: 16, Top: 16);
+          BarTexturePath: "LayaIcons/IconDowned.png";
+          Value: 0.0;
+        }
+
+        CircularProgressBar #RingFollow {
+          Anchor: (Width: 88, Height: 88, Left: 0, Top: 0);
+          Value: 1.0;
+          Color: #58C26A;
+          MaskTexturePath: "LayaRingMask.png";
+        }
+
+        CircularProgressBar #RingAttack {
+          Anchor: (Width: 88, Height: 88, Left: 0, Top: 0);
+          Value: 0.0;
+          Color: #D05050;
+          MaskTexturePath: "LayaRingMask.png";
+        }
+
+        CircularProgressBar #RingDefend {
+          Anchor: (Width: 88, Height: 88, Left: 0, Top: 0);
+          Value: 0.0;
+          Color: #5A9BD5;
+          MaskTexturePath: "LayaRingMask.png";
+        }
+
+        CircularProgressBar #RingMine {
+          Anchor: (Width: 88, Height: 88, Left: 0, Top: 0);
+          Value: 0.0;
+          Color: #E0A63A;
+          MaskTexturePath: "LayaRingMask.png";
+        }
+
+        CircularProgressBar #RingChop {
+          Anchor: (Width: 88, Height: 88, Left: 0, Top: 0);
+          Value: 0.0;
+          Color: #E0A63A;
+          MaskTexturePath: "LayaRingMask.png";
+        }
+
+        CircularProgressBar #RingGather {
+          Anchor: (Width: 88, Height: 88, Left: 0, Top: 0);
+          Value: 0.0;
+          Color: #E0A63A;
+          MaskTexturePath: "LayaRingMask.png";
+        }
+
+        CircularProgressBar #RingStay {
+          Anchor: (Width: 88, Height: 88, Left: 0, Top: 0);
+          Value: 0.0;
+          Color: #A0A6AD;
+          MaskTexturePath: "LayaRingMask.png";
+        }
+
+        CircularProgressBar #RingDowned {
+          Anchor: (Width: 88, Height: 88, Left: 0, Top: 0);
+          Value: 0.0;
+          Color: #8A2A2A;
+          MaskTexturePath: "LayaRingMask.png";
+        }
+
+      }
+
+      Group #Info {
+        Anchor: (Top: 10);
+        LayoutMode: Top;
+
+        Label #Name {
+          Text: "Laya";
+          Style: (FontSize: 18, RenderBold: true, TextColor: #FFFFFF);
+        }
+
+        Group #BarTrack {
+          Anchor: (Width: 190, Height: 10, Top: 4);
+          Background: "Common/ProgressBar.png";
+
+          ProgressBar #BarFill {
+            Anchor: (Width: 190, Height: 10, Left: 0, Top: 0);
+            BarTexturePath: "Common/ProgressBarFillGreen.png";
+            Value: 1.0;
+          }
+        }
+
+        Label #Hp {
+          Anchor: (Top: 3);
+          Text: "100 / 100";
+          Style: (FontSize: 16, RenderBold: true, TextColor: #E6EBF2);
+        }
+
+        Label #Revive {
+          Text: "";
+          Style: (FontSize: 13, RenderBold: true, TextColor: #E0A63A);
+        }
+      }
+    }
+  }
+}

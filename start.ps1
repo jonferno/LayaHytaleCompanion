@@ -1,0 +1,31 @@
+$ErrorActionPreference = "Stop"
+$Root = Split-Path -Parent $MyInvocation.MyCommand.Path
+$python = Get-Command python -ErrorAction SilentlyContinue
+if (-not $python) {
+    throw "Python was not found on PATH. See INSTALL.md."
+}
+
+$configPath = Join-Path $Root "config\bridge-config.json"
+if (-not (Test-Path $configPath)) {
+    Copy-Item (Join-Path $Root "config\bridge-config.example.json") $configPath
+    Write-Host "Created config\bridge-config.json. Add an API key in the settings page."
+}
+
+# Keep the plugin and the bridge pointed at the same local files.
+$envPairs = @{
+    "LAYA_BLOCKS_JSON" = (Join-Path $Root "config\blocks.json")
+    "LAYA_STATE_JSON"  = (Join-Path $Root "config\laya-inventory.json")
+    "LAYA_SKIN_JSON"   = (Join-Path $Root "config\laya-skin.json")
+    "LAYA_COMBAT_JSON" = (Join-Path $Root "config\laya-combat.json")
+    "LAYA_LOG"         = (Join-Path $Root "logs\laya-plugin.log")
+}
+foreach ($pair in $envPairs.GetEnumerator()) {
+    Set-Item -Path "Env:$($pair.Key)" -Value $pair.Value
+}
+
+Write-Host "Starting Laya AI bridge..." -ForegroundColor Green
+Start-Process -FilePath $python.Source -ArgumentList @((Join-Path $Root "ai-bridge\main.py")) -WorkingDirectory $Root
+Start-Sleep -Seconds 2
+Start-Process "http://127.0.0.1:8788"
+Write-Host "Bridge started. Settings: http://127.0.0.1:8788"
+Write-Host "Start Hytale, then chat with Laya or use /laya."

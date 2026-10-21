@@ -1,0 +1,431 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Laya — Appearance</title>
+<style>
+  :root {
+    --bg: #14141f;
+    --panel: #1d1d2e;
+    --panel2: #24243a;
+    --line: #34344f;
+    --text: #e9e9f2;
+    --muted: #9a9ab0;
+    --accent: #7ec8e3;
+    --accent2: #98d8c8;
+    --danger: #e37e8a;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: "Segoe UI", system-ui, sans-serif;
+    background: radial-gradient(1200px 700px at 20% -10%, #23234a 0%, var(--bg) 55%);
+    color: var(--text);
+    min-height: 100vh;
+  }
+  header {
+    position: sticky; top: 0; z-index: 5;
+    background: rgba(20, 20, 31, .92);
+    backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line);
+    padding: 14px 22px;
+    display: flex; align-items: center; gap: 18px; flex-wrap: wrap;
+  }
+  header h1 { font-size: 19px; margin: 0; letter-spacing: .4px; }
+  header h1 span { color: var(--accent); }
+  header .hint { color: var(--muted); font-size: 13px; }
+  header .spacer { flex: 1; }
+  header a.home {
+    color: var(--muted); text-decoration: none; font-size: 13px;
+    border: 1px solid var(--line); border-radius: 6px; padding: 7px 10px;
+  }
+  header a.home:hover { color: var(--accent); border-color: var(--accent); }
+  button {
+    background: var(--accent); color: #12121c; border: 0; border-radius: 7px;
+    padding: 9px 16px; font-weight: 700; cursor: pointer; font-size: 14px;
+  }
+  button:hover { filter: brightness(1.12); }
+  button.ghost { background: transparent; color: var(--text); border: 1px solid var(--line); }
+  button.ghost:hover { border-color: var(--accent); color: var(--accent); }
+  button:disabled { opacity: .45; cursor: default; }
+  main { max-width: 1180px; margin: 0 auto; padding: 22px 18px 80px; }
+  #status {
+    margin: 0 0 16px; padding: 10px 14px; border-radius: 8px;
+    background: var(--panel); border: 1px solid var(--line); color: var(--muted);
+    font-size: 14px; white-space: pre-wrap;
+  }
+  #status.ok { color: var(--accent2); border-color: #2e5a4f; }
+  #status.err { color: var(--danger); border-color: #5a2e38; }
+  .grid {
+    display: grid; gap: 12px;
+    grid-template-columns: repeat(auto-fill, minmax(270px, 1fr));
+  }
+  .card {
+    background: linear-gradient(180deg, var(--panel2), var(--panel));
+    border: 1px solid var(--line); border-radius: 10px; padding: 13px 14px 15px;
+  }
+  .card h2 {
+    margin: 0 0 10px; font-size: 13px; text-transform: uppercase;
+    letter-spacing: .09em; color: var(--accent2); font-weight: 700;
+  }
+  .row { margin: 8px 0; }
+  .row label { display: block; font-size: 11px; color: var(--muted); margin-bottom: 4px; text-transform: uppercase; letter-spacing: .05em; }
+  select {
+    width: 100%; padding: 8px 9px; background: #12121f; color: var(--text);
+    border: 1px solid var(--line); border-radius: 6px; font-size: 14px;
+  }
+  select:focus { outline: 1px solid var(--accent); }
+  .hidden { display: none; }
+  .actions {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 6;
+    background: rgba(20, 20, 31, .95); backdrop-filter: blur(8px);
+    border-top: 1px solid var(--line); padding: 12px 22px;
+    display: flex; gap: 10px; align-items: center; justify-content: center;
+  }
+  .actions .note { color: var(--muted); font-size: 12px; margin-left: 8px; }
+  .swatch-note { color: var(--muted); font-size: 11px; margin-top: 2px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Laya <span>· Appearance</span></h1>
+  <div class="hint">Every character-creator part. Edits apply live and save to <code>config/laya-skin.json</code>.</div>
+  <div class="spacer"></div>
+  <a class="home" href="/">&larr; Laya home</a>
+  <button class="ghost" id="refresh" title="Re-read the parts from the running game">Refresh</button>
+</header>
+
+<main>
+  <div id="status">Connecting to Laya…</div>
+  <div class="grid" id="grid"></div>
+</main>
+
+<div class="actions">
+  <button id="apply">Apply to Laya</button>
+  <button class="ghost" id="randomize">Randomize</button>
+  <button class="ghost" id="reset">Reset</button>
+  <span class="note" id="savedNote"></span>
+</div>
+
+<script>
+"use strict";
+
+const $ = (id) => document.getElementById(id);
+const grid = $("grid");
+const statusEl = $("status");
+
+let DATA = null;          // /api/cosmetics response
+let CURRENT = {};         // skin as loaded (for Reset)
+let STATE = {};           // field -> { part, texture, variant }
+let busy = false;
+
+function pretty(id) {
+  if (!id) return "(none)";
+  return String(id)
+    .replace(/_/g, " ")
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function setStatus(text, kind) {
+  statusEl.textContent = text;
+  statusEl.className = kind || "";
+}
+
+async function load(showBusy = true) {
+  if (showBusy) setStatus("Reading Laya's cosmetic registry…");
+  try {
+    const r = await fetch("/api/cosmetics", { cache: "no-store" });
+    const data = await r.json();
+    if (!data || data.ok === false) {
+      throw new Error((data && data.error) || "The plugin did not return cosmetic parts.");
+    }
+    DATA = data;
+    CURRENT = {};
+    for (const field of Object.keys(data.current || {})) {
+      const v = data.current[field];
+      CURRENT[field] = typeof v === "string" ? v : "";
+    }
+    STATE = {};
+    build();
+    setStatus("Connected. Pick any part; Apply changes her in the world.", "ok");
+  } catch (e) {
+    DATA = null;
+    grid.innerHTML = "";
+    setStatus(
+      "Could not reach Laya's plugin.\n" +
+      (e && e.message ? e.message + "\n" : "") +
+      "Start Hytale (the Laya plugin must be running), then press Refresh.",
+      "err");
+  }
+}
+
+function parseValue(value) {
+  if (!value) return { part: "", texture: "", variant: "" };
+  const bits = String(value).split(".");
+  return { part: bits[0] || "", texture: bits[1] || "", variant: bits[2] || "" };
+}
+
+function partsFor(category) {
+  return category.parts || [];
+}
+
+function findPart(category, id) {
+  return partsFor(category).find((p) => p.id === id) || null;
+}
+
+function texturesFor(part, variant) {
+  if (!part) return [];
+  const out = [];
+  const add = (v) => { if (v && !out.includes(v)) out.push(v); };
+  (part.gradients || []).forEach(add);
+  if (variant && part.variants && part.variants[variant]) {
+    (part.variants[variant] || []).forEach(add);
+  } else {
+    (part.textures || []).forEach(add);
+  }
+  return out;
+}
+
+function makeSelect(options, value, onChange) {
+  const sel = document.createElement("select");
+  for (const opt of options) {
+    const o = document.createElement("option");
+    o.value = opt.value;
+    o.textContent = opt.label;
+    sel.appendChild(o);
+  }
+  if (value !== undefined && value !== null &&
+      options.some((o) => o.value === value)) {
+    sel.value = value;
+  }
+  if (onChange) sel.addEventListener("change", onChange);
+  return sel;
+}
+
+function build() {
+  grid.innerHTML = "";
+  for (const category of DATA.categories || []) {
+    const field = category.key;
+    const parsed = parseValue(CURRENT[field] || "");
+    const parts = partsFor(category);
+
+    const card = document.createElement("div");
+    card.className = "card";
+    card.dataset.field = field;
+    const h = document.createElement("h2");
+    h.textContent = category.label || field;
+    card.appendChild(h);
+
+    // Part
+    const partRow = document.createElement("div");
+    partRow.className = "row";
+    const partLabel = document.createElement("label");
+    partLabel.textContent = "Part";
+    const partOptions = [];
+    if (category.optional) partOptions.push({ value: "", label: "(none)" });
+    for (const p of parts) partOptions.push({ value: p.id, label: pretty(p.id) });
+    const partSel = makeSelect(partOptions, parsed.part || (category.optional ? "" : (parts[0] && parts[0].id)));
+    partRow.appendChild(partLabel);
+    partRow.appendChild(partSel);
+    card.appendChild(partRow);
+
+    // Variant
+    const variantRow = document.createElement("div");
+    variantRow.className = "row";
+    const variantLabel = document.createElement("label");
+    variantLabel.textContent = "Variant";
+    const variantSel = document.createElement("select");
+    variantRow.appendChild(variantLabel);
+    variantRow.appendChild(variantSel);
+    card.appendChild(variantRow);
+
+    // Texture / colour
+    const texRow = document.createElement("div");
+    texRow.className = "row";
+    const texLabel = document.createElement("label");
+    texLabel.textContent = "Colour / texture";
+    const texSel = document.createElement("select");
+    texRow.appendChild(texLabel);
+    texRow.appendChild(texSel);
+    card.appendChild(texRow);
+
+    const state = STATE[field] = { part: "", texture: "", variant: "" };
+
+    function refreshVariants(preferred) {
+      const part = findPart(category, partSel.value);
+      const keys = part && part.variants ? Object.keys(part.variants) : [];
+      variantSel.innerHTML = "";
+      if (!keys.length) {
+        variantRow.classList.add("hidden");
+        state.variant = "";
+        return;
+      }
+      variantRow.classList.remove("hidden");
+      for (const k of keys) {
+        const o = document.createElement("option");
+        o.value = k;
+        o.textContent = pretty(k);
+        variantSel.appendChild(o);
+      }
+      if (preferred && keys.includes(preferred)) variantSel.value = preferred;
+      state.variant = variantSel.value;
+    }
+
+    function refreshTextures(preferred) {
+      const part = findPart(category, partSel.value);
+      const variant = variantSel.value;
+      const opts = texturesFor(part, variant);
+      texSel.innerHTML = "";
+      if (!opts.length) {
+        texRow.classList.add("hidden");
+        state.texture = "";
+        return;
+      }
+      texRow.classList.remove("hidden");
+      for (const t of opts) {
+        const o = document.createElement("option");
+        o.value = t;
+        o.textContent = pretty(t);
+        texSel.appendChild(o);
+      }
+      if (preferred && opts.includes(preferred)) texSel.value = preferred;
+      state.texture = texSel.value;
+    }
+
+    function syncState() {
+      state.part = partSel.value;
+      state.variant = variantSel.value;
+      state.texture = texSel.value;
+    }
+
+    partSel.addEventListener("change", () => {
+      refreshVariants(null);
+      refreshTextures(null);
+      syncState();
+      if (partSel.value === "") {
+        variantRow.classList.add("hidden");
+        texRow.classList.add("hidden");
+        state.variant = "";
+        state.texture = "";
+      }
+    });
+    variantSel.addEventListener("change", () => {
+      refreshTextures(null);
+      syncState();
+    });
+    texSel.addEventListener("change", syncState);
+
+    // Initial values.
+    if (parsed.part) {
+      partSel.value = parsed.part;
+    }
+    if (!findPart(category, partSel.value)) {
+      partSel.value = category.optional ? "" : (parts[0] ? parts[0].id : "");
+    }
+    refreshVariants(parsed.variant);
+    refreshTextures(parsed.texture);
+    if (!parsed.part && category.optional) {
+      variantRow.classList.add("hidden");
+      texRow.classList.add("hidden");
+    }
+    syncState();
+
+    grid.appendChild(card);
+  }
+}
+
+function valueFor(field) {
+  const s = STATE[field];
+  if (!s || !s.part) return "";
+  if (!s.texture) return s.part;
+  return s.variant ? `${s.part}.${s.texture}.${s.variant}` : `${s.part}.${s.texture}`;
+}
+
+function collect() {
+  const out = {};
+  for (const category of DATA.categories || []) {
+    out[category.key] = valueFor(category.key);
+  }
+  return out;
+}
+
+async function applySkin() {
+  if (busy || !DATA) return;
+  busy = true;
+  $("apply").disabled = true;
+  const payload = collect();
+  setStatus("Sending the new look to Laya…");
+  try {
+    const r = await fetch("/api/appearance", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok || data.ok === false) {
+      throw new Error(data.error || `HTTP ${r.status}`);
+    }
+    CURRENT = { ...payload };
+    setStatus("Applied. She should change right in front of you. Saved for next session.", "ok");
+  } catch (e) {
+    setStatus("Apply failed: " + (e && e.message ? e.message : e), "err");
+  } finally {
+    busy = false;
+    $("apply").disabled = false;
+  }
+}
+
+function randomize() {
+  if (!DATA) return;
+  for (const category of DATA.categories || []) {
+    const field = category.key;
+    const parts = partsFor(category);
+    if (!parts.length) continue;
+    const card = grid.querySelector(`[data-field="${field}"]`);
+    if (!card) continue;
+    const selects = card.querySelectorAll("select");
+    const partSel = selects[0];
+    const variantSel = selects[1];
+    const texSel = selects[2];
+
+    if (category.optional && Math.random() < 0.22) {
+      partSel.value = "";
+      partSel.dispatchEvent(new Event("change"));
+      continue;
+    }
+    const part = parts[Math.floor(Math.random() * parts.length)];
+    partSel.value = part.id;
+    partSel.dispatchEvent(new Event("change"));
+
+    const variants = part.variants ? Object.keys(part.variants) : [];
+    if (variants.length) {
+      variantSel.value = variants[Math.floor(Math.random() * variants.length)];
+      variantSel.dispatchEvent(new Event("change"));
+    }
+    const textures = [...texSel.options].map((o) => o.value);
+    if (textures.length) {
+      texSel.value = textures[Math.floor(Math.random() * textures.length)];
+      texSel.dispatchEvent(new Event("change"));
+    }
+  }
+  applySkin();
+}
+
+function reset() {
+  if (!DATA) return;
+  build();
+  setStatus("Restored the last applied look. Press Apply to send it again if needed.", "");
+}
+
+$("apply").addEventListener("click", applySkin);
+$("randomize").addEventListener("click", randomize);
+$("reset").addEventListener("click", reset);
+$("refresh").addEventListener("click", () => load(true));
+
+load(true);
+</script>
+</body>
+</html>

@@ -1,0 +1,99 @@
+{
+  "$Comment": "Laya - custom companion role. Follow is engine-driven: the plugin writes the FollowTargetPosition slot (3x/sec), this instruction ReadPosition -> Seek then walks her there THROUGH the Walk motion controller, which is what animates the legs. HeadMotion Watch keeps her eyes on the player. Java only writes targets; teleports happen only via watchdogs. Slot names are auto-registered at role-build time (BuilderSupport.getPositionSlot).",
+  "Type": "Generic",
+  "Parameters": {
+    "NameTranslationKey": {
+      "Value": "npc.laya.name",
+      "Description": "Translation key for NPC name display"
+    }
+  },
+  "DefaultNPCAttitude": "Ignore",
+  "DefaultPlayerAttitude": "Neutral",
+  "Appearance": "Player",
+  "MaxHealth": 100,
+  "InventorySize": 28,
+  "HotbarSize": 8,
+  "OffHandSlots": 4,
+  "DisableDamageGroups": [ "Self" ],
+  "KnockbackScale": 0.0,
+  "MotionControllerList": [
+    {
+      "$Comment": "Tuned after the ForestHues companion Walk controller (verified keys against our 0.7.2 server jar: RunThresholdRange/MaxClimbHeight also used by vanilla 0.7.2 roles).",
+      "Type": "Walk",
+      "MaxWalkSpeed": 6,
+      "RunThreshold": 0.3,
+      "RunThresholdRange": 0.1,
+      "Acceleration": 10,
+      "Gravity": 35,
+      "MaxFallSpeed": 20,
+      "MaxClimbHeight": 1.2,
+      "MaxRotationSpeed": 360
+    }
+  ],
+  "Instructions": [
+    {
+      "Continue": true,
+      "Sensor": {
+        "Type": "Player",
+        "Range": 30
+      }
+    },
+    {
+      "$Comment": "Task act (Task 4): claims the task slot within 1.6 blocks and holds position. The swing is played ONCE per hit from Java (NPCEntity.playAnimation, Slot Action) - a PlayAnimation action here would restart it every server tick and looked like a 10 Hz jitter.",
+      "Sensor": { "Type": "ReadPosition", "Slot": "TaskTargetPosition", "Range": 1.6, "MinRange": 0.0 },
+      "BodyMotion": { "Type": "Nothing" }
+    },
+    {
+      "$Comment": "Task walk (Task 4): seeks the same task slot out to 120 blocks, stopping 1.5 short. Range-exclusive with the act block.",
+      "Sensor": { "Type": "ReadPosition", "Slot": "TaskTargetPosition", "Range": 120, "MinRange": 0.6 },
+      "BodyMotion": { "Type": "Seek", "SlowDownDistance": 2, "StopDistance": 1.5, "RelativeSpeed": 1 }
+    },
+    {
+      "Continue": true,
+      "$Comment": "Persistent follow seek: reads the slot written from Java. Continue:true keeps this block from blocking the tree (the pre-Phase-1 Seek freeze hit a non-Continue block).",
+      "Sensor": {
+        "Type": "ReadPosition",
+        "Slot": "FollowTargetPosition",
+        "Range": 40,
+        "MinRange": 0.5
+      },
+      "BodyMotion": {
+        "Type": "Seek",
+        "SlowDownDistance": 2,
+        "StopDistance": 1.5,
+        "RelativeSpeed": 1
+      }
+    },
+    {
+      "$Comment": "Pickup (Task 4): picks up dropped items near her into the inventory. Continue:true keeps it from ending the chain.",
+      "Continue": true,
+      "Sensor": { "Type": "DroppedItem", "Range": 6.0 },
+      "Actions": [ { "Type": "PickUpItem", "Once": false, "Hoover": false, "StorageTarget": "Inventory", "Range": 6.0 } ]
+    },
+    {
+      "Sensor": {
+        "Type": "Any"
+      },
+      "BodyMotion": {
+        "Type": "Nothing"
+      }
+    }
+  ],
+  "InteractionInstruction": {
+    "$Comment": "Cycle 7: declaring an InteractionInstruction is what makes StateSupport initialise its interaction sets (trackInteractions) - removing it entirely left them null and threw on interact. Only the set-true branch remains: the old Not(CanInteract)->false branch made the component flicker, which is why the key had to be held. The plugin also forces it every follow tick and consumes the engine's Use queue to open her pack.",
+    "Instructions": [
+      {
+        "Continue": true,
+        "Sensor": { "Type": "Any" },
+        "Actions": [
+          {
+            "Type": "SetInteractable",
+            "Interactable": true,
+            "Hint": "server.interactionHints.generic"
+          }
+        ]
+      }
+    ]
+  },
+  "NameTranslationKey": { "Compute": "NameTranslationKey" }
+}

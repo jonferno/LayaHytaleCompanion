@@ -1,0 +1,1160 @@
+$C = "Common.ui";
+
+Group {
+  LayoutMode: CenterMiddle;
+
+  Group #Panel {
+    Anchor: (Width: 1230, Height: 420);
+    Background: #345068(0.97);
+    Padding: (Full: 3);
+    LayoutMode: Left;
+
+    Group #Inner {
+      Anchor: (Width: 1224, Height: 414);
+      Background: #303F53(0.96);
+      Padding: (Full: 14);
+      LayoutMode: Top;
+
+      Label #Title {
+        Text: "Your Inventory  |  Laya";
+        Style: (FontSize: 22, RenderBold: true, TextColor: #FFFFFF);
+      }
+
+      Label #Selection {
+        Anchor: (Top: 4);
+        Text: "Click an item, then a target slot. Double/right-click sends a stack across.";
+        Style: (FontSize: 13, TextColor: #A0A6AD);
+      }
+
+      Group #Content {
+        Anchor: (Height: 310, Top: 10);
+        LayoutMode: Left;
+
+        Group #PlayerColumn {
+          Anchor: (Width: 540, Height: 310);
+          LayoutMode: Top;
+          Label #PlayerLabel {
+            Text: "Your Pack";
+            Style: (FontSize: 16, RenderBold: true, TextColor: #FFFFFF);
+          }
+
+          Group #PlayerRow0 {
+            Anchor: (Height: 60);
+            LayoutMode: Left;
+
+            ItemSlotButton #Player0 {
+              Anchor: (Width: 58, Height: 58, Right: 2);
+              Background: #243447;
+
+              ItemSlot #Player0Icon {
+                Anchor: (Full: 0);
+                ShowQualityBackground: true;
+                ShowDurabilityBar: true;
+                ShowQuantity: true;
+              }
+            }
+
+            ItemSlotButton #Player1 {
+              Anchor: (Width: 58, Height: 58, Right: 2);
+              Background: #243447;
+
+              ItemSlot #Player1Icon {
+                Anchor: (Full: 0);
+                ShowQualityBackground: true;
+                ShowDurabilityBar: true;
+                ShowQuantity: true;
+              }
+            }
+
+            ItemSlotButton #Player2 {
+              Anchor: (Width: 58, Height: 58, Right: 2);
+              Background: #243447;
+
+              ItemSlot #Player2Icon {
+                Anchor: (Full: 0);
+                ShowQualityBackground: true;
+                ShowDurabilityBar: true;
+                ShowQuantity: true;
+              }
+            }
+
+            ItemSlotButton #Player3 {
+              Anchor: (Width: 58, Height: 58, Right: 2);
+              Background: #243447;
+
+              ItemSlot #Player3Icon {
+                Anchor: (Full: 0);
+                ShowQualityBackground: true;
+                ShowDurabilityBar: true;
+                ShowQuantity: true;
+              }
+            }
+
+            ItemSlotButton #Player4 {
+              Anchor: (Width: 58, Height: 58, Right: 2);
+              Background: #243447;
+
+              ItemSlot #Player4Icon {
+                Anchor: (Full: 0);
+                ShowQualityBackground: true;
+                ShowDurabilityBar: true;
+                ShowQuantity: true;
+              }
+            }
+
+            ItemSlotButton #Player5 {
+              Anchor: (Width: 58, Height: 58, Right: 2);
+              Background: #243447;
+
+              ItemSlot #Player5Icon {
+                Anchor: (Full: 0);
+                ShowQualityBackground: true;
+                ShowDurabilityBar: true;
+                ShowQuantity: true;
+              }
+            }
+
+            ItemSlotButton #Player6 {
+              Anchor: (Width: 58, Height: 58, Right: 2);
+              Background: #243447;
+
+              ItemSlot #Player6Icon {
+                Anchor: (Full: 0);
+                ShowQualityBackground: true;
+                ShowDurabilityBar: true;
+                ShowQuantity: true;
+              }
+            }
+
+            ItemSlotButton #Player7 {
+              Anchor: (Width: 58, Height: 58, Right: 2);
+              Background: #243447;
+
+              ItemSlot #Player7Icon {
+                Anchor: (Full: 0);
+                ShowQualityBackground: true;
+                ShowDurabilityBar: true;
+                ShowQuantity: true;
+              }
+            }
+
+            ItemSlotButton #Player8 {
+              Anchor: (Width: 58, Height: 58, Right: 2);
+              Background: #243447;
+
+              ItemSlot #Player8Icon {
+                Anchor: (Full: 0);
+                ShowQualityBackground: true;
+                ShowDurabilityBar: true;
+                ShowQuantity: true;
+              }
+            }
+
+          }
+
+          Group #PlayerRow1 {
+            Anchor: (Height: 60);
+            LayoutMode: Left;
+
+            ItemSlotButton #Player9 {
+              Anchor: (Width: 58, Height: 58, Right: 2);
+              Background: #243447;
+
+              ItemSlot #Player9Icon {
+                Anchor: (Full: 0);
+                ShowQualityBackground: true;
+                ShowDurabilityBar: true;
+                ShowQuantity: true;
+              }
+            }
+
+            ItemSlotButton #Player10 {
+              Anchor: (Width: 58, Height: 58, Right: 2);
+              Background: #243447;
+
+              ItemSlot #Player10Icon {
+                Anchor: (Full: 0);
+                ShowQualityBackground: true;
+                ShowDurabilityBar: true;
+                ShowQuantity: true;
+              }
+            }
+
+            ItemSlotButton #Player11 {
+              Anchor: (Width: 58, Height: 58, Right: 2);
+              Background: #243447;
+
+              ItemSlot #Player11Icon {
+                Anchor: (Full: 0);
+                ShowQualityBackground: true;
+                ShowDurabilityBar: true;
+                ShowQuantity: true;
+              }
+            }
+
+            ItemSlotButton #Player12 {
+              Anchor: (Width: 58, Height: 58, Right: 2);
+              Background: #243447;
+
+              ItemSlot #Player12Icon {
+                Anchor: (Full: 0);
+                ShowQualityBackground: true;
+                ShowDurabilityBar: true;
+                ShowQuantity: true;
+              }
+            }
+
+            ItemSlotButton #Player13 {
+              Anchor: (Width: 58, Height: 58, Right: 2);
+              Background: #243447;
+
+              ItemSlot #Player13Icon {
+                Anchor: (Full: 0);
+                ShowQualityBackground: true;
+                ShowDurabilityBar: true;
+                ShowQuantity: true;
+              }
+            }
+
+            ItemSlotButton #Player14 {
+              Anchor: (Width: 58, Height: 58, Right: 2);
+              Background: #243447;
+
+              ItemSlot #Player14Icon {
+                Anchor: (Full: 0);
+                ShowQualityBackground: true;
+                ShowDurabilityBar: true;
+                ShowQuantity: true;
+              }
+            }
+
+            ItemSlotButton #Player15 {
+              Anchor: (Width: 58, Height: 58, Right: 2);
+              Background: #243447;
+
+              ItemSlot #Player15Icon {
+                Anchor: (Full: 0);
+                ShowQualityBackground: true;
+                ShowDurabilityBar: true;
+                ShowQuantity: true;
+              }
+            }
+
+            ItemSlotButton #Player16 {
+              Anchor: (Width: 58, Height: 58, Right: 2);
+              Background: #243447;
+
+              ItemSlot #Player16Icon {
+                Anchor: (Full: 0);
+                ShowQualityBackground: true;
+                ShowDurabilityBar: true;
+                ShowQuantity: true;
+              }
+            }
+
+            ItemSlotButton #Player17 {
+              Anchor: (Width: 58, Height: 58, Right: 2);
+              Background: #243447;
+
+              ItemSlot #Player17Icon {
+                Anchor: (Full: 0);
+                ShowQualityBackground: true;
+                ShowDurabilityBar: true;
+                ShowQuantity: true;
+              }
+            }
+
+          }
+
+          Group #PlayerRow2 {
+            Anchor: (Height: 60);
+            LayoutMode: Left;
+
+            ItemSlotButton #Player18 {
+              Anchor: (Width: 58, Height: 58, Right: 2);
+              Background: #243447;
+
+              ItemSlot #Player18Icon {
+                Anchor: (Full: 0);
+                ShowQualityBackground: true;
+                ShowDurabilityBar: true;
+                ShowQuantity: true;
+              }
+            }
+
+            ItemSlotButton #Player19 {
+              Anchor: (Width: 58, Height: 58, Right: 2);
+              Background: #243447;
+
+              ItemSlot #Player19Icon {
+                Anchor: (Full: 0);
+                ShowQualityBackground: true;
+                ShowDurabilityBar: true;
+                ShowQuantity: true;
+              }
+            }
+
+            ItemSlotButton #Player20 {
+              Anchor: (Width: 58, Height: 58, Right: 2);
+              Background: #243447;
+
+              ItemSlot #Player20Icon {
+                Anchor: (Full: 0);
+                ShowQualityBackground: true;
+                ShowDurabilityBar: true;
+                ShowQuantity: true;
+              }
+            }
+
+            ItemSlotButton #Player21 {
+              Anchor: (Width: 58, Height: 58, Right: 2);
+              Background: #243447;
+
+              ItemSlot #Player21Icon {
+                Anchor: (Full: 0);
+                ShowQualityBackground: true;
+                ShowDurabilityBar: true;
+                ShowQuantity: true;
+              }
+            }
+
+            ItemSlotButton #Player22 {
+              Anchor: (Width: 58, Height: 58, Right: 2);
+              Background: #243447;
+
+              ItemSlot #Player22Icon {
+                Anchor: (Full: 0);
+                ShowQualityBackground: true;
+                ShowDurabilityBar: true;
+                ShowQuantity: true;
+              }
+            }
+
+            ItemSlotButton #Player23 {
+              Anchor: (Width: 58, Height: 58, Right: 2);
+              Background: #243447;
+
+              ItemSlot #Player23Icon {
+                Anchor: (Full: 0);
+                ShowQualityBackground: true;
+                ShowDurabilityBar: true;
+                ShowQuantity: true;
+              }
+            }
+
+            ItemSlotButton #Player24 {
+              Anchor: (Width: 58, Height: 58, Right: 2);
+              Background: #243447;
+
+              ItemSlot #Player24Icon {
+                Anchor: (Full: 0);
+                ShowQualityBackground: true;
+                ShowDurabilityBar: true;
+                ShowQuantity: true;
+              }
+            }
+
+            ItemSlotButton #Player25 {
+              Anchor: (Width: 58, Height: 58, Right: 2);
+              Background: #243447;
+
+              ItemSlot #Player25Icon {
+                Anchor: (Full: 0);
+                ShowQualityBackground: true;
+                ShowDurabilityBar: true;
+                ShowQuantity: true;
+              }
+            }
+
+            ItemSlotButton #Player26 {
+              Anchor: (Width: 58, Height: 58, Right: 2);
+              Background: #243447;
+
+              ItemSlot #Player26Icon {
+                Anchor: (Full: 0);
+                ShowQualityBackground: true;
+                ShowDurabilityBar: true;
+                ShowQuantity: true;
+              }
+            }
+
+          }
+
+          Group #PlayerRow3 {
+            Anchor: (Height: 60);
+            LayoutMode: Left;
+
+            ItemSlotButton #Player27 {
+              Anchor: (Width: 58, Height: 58, Right: 2);
+              Background: #243447;
+
+              ItemSlot #Player27Icon {
+                Anchor: (Full: 0);
+                ShowQualityBackground: true;
+                ShowDurabilityBar: true;
+                ShowQuantity: true;
+              }
+            }
+
+            ItemSlotButton #Player28 {
+              Anchor: (Width: 58, Height: 58, Right: 2);
+              Background: #243447;
+
+              ItemSlot #Player28Icon {
+                Anchor: (Full: 0);
+                ShowQualityBackground: true;
+                ShowDurabilityBar: true;
+                ShowQuantity: true;
+              }
+            }
+
+            ItemSlotButton #Player29 {
+              Anchor: (Width: 58, Height: 58, Right: 2);
+              Background: #243447;
+
+              ItemSlot #Player29Icon {
+                Anchor: (Full: 0);
+                ShowQualityBackground: true;
+                ShowDurabilityBar: true;
+                ShowQuantity: true;
+              }
+            }
+
+            ItemSlotButton #Player30 {
+              Anchor: (Width: 58, Height: 58, Right: 2);
+              Background: #243447;
+
+              ItemSlot #Player30Icon {
+                Anchor: (Full: 0);
+                ShowQualityBackground: true;
+                ShowDurabilityBar: true;
+                ShowQuantity: true;
+              }
+            }
+
+            ItemSlotButton #Player31 {
+              Anchor: (Width: 58, Height: 58, Right: 2);
+              Background: #243447;
+
+              ItemSlot #Player31Icon {
+                Anchor: (Full: 0);
+                ShowQualityBackground: true;
+                ShowDurabilityBar: true;
+                ShowQuantity: true;
+              }
+            }
+
+            ItemSlotButton #Player32 {
+              Anchor: (Width: 58, Height: 58, Right: 2);
+              Background: #243447;
+
+              ItemSlot #Player32Icon {
+                Anchor: (Full: 0);
+                ShowQualityBackground: true;
+                ShowDurabilityBar: true;
+                ShowQuantity: true;
+              }
+            }
+
+            ItemSlotButton #Player33 {
+              Anchor: (Width: 58, Height: 58, Right: 2);
+              Background: #243447;
+
+              ItemSlot #Player33Icon {
+                Anchor: (Full: 0);
+                ShowQualityBackground: true;
+                ShowDurabilityBar: true;
+                ShowQuantity: true;
+              }
+            }
+
+            ItemSlotButton #Player34 {
+              Anchor: (Width: 58, Height: 58, Right: 2);
+              Background: #243447;
+
+              ItemSlot #Player34Icon {
+                Anchor: (Full: 0);
+                ShowQualityBackground: true;
+                ShowDurabilityBar: true;
+                ShowQuantity: true;
+              }
+            }
+
+            ItemSlotButton #Player35 {
+              Anchor: (Width: 58, Height: 58, Right: 2);
+              Background: #243447;
+
+              ItemSlot #Player35Icon {
+                Anchor: (Full: 0);
+                ShowQualityBackground: true;
+                ShowDurabilityBar: true;
+                ShowQuantity: true;
+              }
+            }
+
+          }
+
+          Group #PlayerRow4 {
+            Anchor: (Height: 60);
+            LayoutMode: Left;
+
+            ItemSlotButton #Player36 {
+              Anchor: (Width: 58, Height: 58, Right: 2);
+              Background: #243447;
+
+              ItemSlot #Player36Icon {
+                Anchor: (Full: 0);
+                ShowQualityBackground: true;
+                ShowDurabilityBar: true;
+                ShowQuantity: true;
+              }
+            }
+
+            ItemSlotButton #Player37 {
+              Anchor: (Width: 58, Height: 58, Right: 2);
+              Background: #243447;
+
+              ItemSlot #Player37Icon {
+                Anchor: (Full: 0);
+                ShowQualityBackground: true;
+                ShowDurabilityBar: true;
+                ShowQuantity: true;
+              }
+            }
+
+            ItemSlotButton #Player38 {
+              Anchor: (Width: 58, Height: 58, Right: 2);
+              Background: #243447;
+
+              ItemSlot #Player38Icon {
+                Anchor: (Full: 0);
+                ShowQualityBackground: true;
+                ShowDurabilityBar: true;
+                ShowQuantity: true;
+              }
+            }
+
+            ItemSlotButton #Player39 {
+              Anchor: (Width: 58, Height: 58, Right: 2);
+              Background: #243447;
+
+              ItemSlot #Player39Icon {
+                Anchor: (Full: 0);
+                ShowQualityBackground: true;
+                ShowDurabilityBar: true;
+                ShowQuantity: true;
+              }
+            }
+
+            ItemSlotButton #Player40 {
+              Anchor: (Width: 58, Height: 58, Right: 2);
+              Background: #243447;
+
+              ItemSlot #Player40Icon {
+                Anchor: (Full: 0);
+                ShowQualityBackground: true;
+                ShowDurabilityBar: true;
+                ShowQuantity: true;
+              }
+            }
+
+            ItemSlotButton #Player41 {
+              Anchor: (Width: 58, Height: 58, Right: 2);
+              Background: #243447;
+
+              ItemSlot #Player41Icon {
+                Anchor: (Full: 0);
+                ShowQualityBackground: true;
+                ShowDurabilityBar: true;
+                ShowQuantity: true;
+              }
+            }
+
+            ItemSlotButton #Player42 {
+              Anchor: (Width: 58, Height: 58, Right: 2);
+              Background: #243447;
+
+              ItemSlot #Player42Icon {
+                Anchor: (Full: 0);
+                ShowQualityBackground: true;
+                ShowDurabilityBar: true;
+                ShowQuantity: true;
+              }
+            }
+
+            ItemSlotButton #Player43 {
+              Anchor: (Width: 58, Height: 58, Right: 2);
+              Background: #243447;
+
+              ItemSlot #Player43Icon {
+                Anchor: (Full: 0);
+                ShowQualityBackground: true;
+                ShowDurabilityBar: true;
+                ShowQuantity: true;
+              }
+            }
+
+            ItemSlotButton #Player44 {
+              Anchor: (Width: 58, Height: 58, Right: 2);
+              Background: #243447;
+
+              ItemSlot #Player44Icon {
+                Anchor: (Full: 0);
+                ShowQualityBackground: true;
+                ShowDurabilityBar: true;
+                ShowQuantity: true;
+              }
+            }
+
+          }
+
+        }
+
+        Group #LayaColumn {
+          Anchor: (Width: 540, Height: 310, Left: 10);
+          LayoutMode: Top;
+          Label #LayaLabel {
+            Text: "Laya's Pack";
+            Style: (FontSize: 16, RenderBold: true, TextColor: #FFFFFF);
+          }
+
+          Group #LayaRow0 {
+            Anchor: (Height: 60);
+            LayoutMode: Left;
+
+            ItemSlotButton #Pack0 {
+              Anchor: (Width: 58, Height: 58, Right: 2);
+              Background: #243447;
+
+              ItemSlot #Pack0Icon {
+                Anchor: (Full: 0);
+                ShowQualityBackground: true;
+                ShowDurabilityBar: true;
+                ShowQuantity: true;
+              }
+            }
+
+            ItemSlotButton #Pack1 {
+              Anchor: (Width: 58, Height: 58, Right: 2);
+              Background: #243447;
+
+              ItemSlot #Pack1Icon {
+                Anchor: (Full: 0);
+                ShowQualityBackground: true;
+                ShowDurabilityBar: true;
+                ShowQuantity: true;
+              }
+            }
+
+            ItemSlotButton #Pack2 {
+              Anchor: (Width: 58, Height: 58, Right: 2);
+              Background: #243447;
+
+              ItemSlot #Pack2Icon {
+                Anchor: (Full: 0);
+                ShowQualityBackground: true;
+                ShowDurabilityBar: true;
+                ShowQuantity: true;
+              }
+            }
+
+            ItemSlotButton #Pack3 {
+              Anchor: (Width: 58, Height: 58, Right: 2);
+              Background: #243447;
+
+              ItemSlot #Pack3Icon {
+                Anchor: (Full: 0);
+                ShowQualityBackground: true;
+                ShowDurabilityBar: true;
+                ShowQuantity: true;
+              }
+            }
+
+            ItemSlotButton #Pack4 {
+              Anchor: (Width: 58, Height: 58, Right: 2);
+              Background: #243447;
+
+              ItemSlot #Pack4Icon {
+                Anchor: (Full: 0);
+                ShowQualityBackground: true;
+                ShowDurabilityBar: true;
+                ShowQuantity: true;
+              }
+            }
+
+            ItemSlotButton #Pack5 {
+              Anchor: (Width: 58, Height: 58, Right: 2);
+              Background: #243447;
+
+              ItemSlot #Pack5Icon {
+                Anchor: (Full: 0);
+                ShowQualityBackground: true;
+                ShowDurabilityBar: true;
+                ShowQuantity: true;
+              }
+            }
+
+            ItemSlotButton #Pack6 {
+              Anchor: (Width: 58, Height: 58, Right: 2);
+              Background: #243447;
+
+              ItemSlot #Pack6Icon {
+                Anchor: (Full: 0);
+                ShowQualityBackground: true;
+                ShowDurabilityBar: true;
+                ShowQuantity: true;
+              }
+            }
+
+            ItemSlotButton #Pack7 {
+              Anchor: (Width: 58, Height: 58, Right: 2);
+              Background: #243447;
+
+              ItemSlot #Pack7Icon {
+                Anchor: (Full: 0);
+                ShowQualityBackground: true;
+                ShowDurabilityBar: true;
+                ShowQuantity: true;
+              }
+            }
+
+            ItemSlotButton #Pack8 {
+              Anchor: (Width: 58, Height: 58, Right: 2);
+              Background: #243447;
+
+              ItemSlot #Pack8Icon {
+                Anchor: (Full: 0);
+                ShowQualityBackground: true;
+                ShowDurabilityBar: true;
+                ShowQuantity: true;
+              }
+            }
+
+          }
+
+          Group #LayaRow1 {
+            Anchor: (Height: 60);
+            LayoutMode: Left;
+
+            ItemSlotButton #Pack9 {
+              Anchor: (Width: 58, Height: 58, Right: 2);
+              Background: #243447;
+
+              ItemSlot #Pack9Icon {
+                Anchor: (Full: 0);
+                ShowQualityBackground: true;
+                ShowDurabilityBar: true;
+                ShowQuantity: true;
+              }
+            }
+
+            ItemSlotButton #Pack10 {
+              Anchor: (Width: 58, Height: 58, Right: 2);
+              Background: #243447;
+
+              ItemSlot #Pack10Icon {
+                Anchor: (Full: 0);
+                ShowQualityBackground: true;
+                ShowDurabilityBar: true;
+                ShowQuantity: true;
+              }
+            }
+
+            ItemSlotButton #Pack11 {
+              Anchor: (Width: 58, Height: 58, Right: 2);
+              Background: #243447;
+
+              ItemSlot #Pack11Icon {
+                Anchor: (Full: 0);
+                ShowQualityBackground: true;
+                ShowDurabilityBar: true;
+                ShowQuantity: true;
+              }
+            }
+
+            ItemSlotButton #Pack12 {
+              Anchor: (Width: 58, Height: 58, Right: 2);
+              Background: #243447;
+
+              ItemSlot #Pack12Icon {
+                Anchor: (Full: 0);
+                ShowQualityBackground: true;
+                ShowDurabilityBar: true;
+                ShowQuantity: true;
+              }
+            }
+
+            ItemSlotButton #Pack13 {
+              Anchor: (Width: 58, Height: 58, Right: 2);
+              Background: #243447;
+
+              ItemSlot #Pack13Icon {
+                Anchor: (Full: 0);
+                ShowQualityBackground: true;
+                ShowDurabilityBar: true;
+                ShowQuantity: true;
+              }
+            }
+
+            ItemSlotButton #Pack14 {
+              Anchor: (Width: 58, Height: 58, Right: 2);
+              Background: #243447;
+
+              ItemSlot #Pack14Icon {
+                Anchor: (Full: 0);
+                ShowQualityBackground: true;
+                ShowDurabilityBar: true;
+                ShowQuantity: true;
+              }
+            }
+
+            ItemSlotButton #Pack15 {
+              Anchor: (Width: 58, Height: 58, Right: 2);
+              Background: #243447;
+
+              ItemSlot #Pack15Icon {
+                Anchor: (Full: 0);
+                ShowQualityBackground: true;
+                ShowDurabilityBar: true;
+                ShowQuantity: true;
+              }
+            }
+
+            ItemSlotButton #Pack16 {
+              Anchor: (Width: 58, Height: 58, Right: 2);
+              Background: #243447;
+
+              ItemSlot #Pack16Icon {
+                Anchor: (Full: 0);
+                ShowQualityBackground: true;
+                ShowDurabilityBar: true;
+                ShowQuantity: true;
+              }
+            }
+
+            ItemSlotButton #Pack17 {
+              Anchor: (Width: 58, Height: 58, Right: 2);
+              Background: #243447;
+
+              ItemSlot #Pack17Icon {
+                Anchor: (Full: 0);
+                ShowQualityBackground: true;
+                ShowDurabilityBar: true;
+                ShowQuantity: true;
+              }
+            }
+
+          }
+
+          Group #LayaRow2 {
+            Anchor: (Height: 60);
+            LayoutMode: Left;
+
+            ItemSlotButton #Pack18 {
+              Anchor: (Width: 58, Height: 58, Right: 2);
+              Background: #243447;
+
+              ItemSlot #Pack18Icon {
+                Anchor: (Full: 0);
+                ShowQualityBackground: true;
+                ShowDurabilityBar: true;
+                ShowQuantity: true;
+              }
+            }
+
+            ItemSlotButton #Pack19 {
+              Anchor: (Width: 58, Height: 58, Right: 2);
+              Background: #243447;
+
+              ItemSlot #Pack19Icon {
+                Anchor: (Full: 0);
+                ShowQualityBackground: true;
+                ShowDurabilityBar: true;
+                ShowQuantity: true;
+              }
+            }
+
+            ItemSlotButton #Pack20 {
+              Anchor: (Width: 58, Height: 58, Right: 2);
+              Background: #243447;
+
+              ItemSlot #Pack20Icon {
+                Anchor: (Full: 0);
+                ShowQualityBackground: true;
+                ShowDurabilityBar: true;
+                ShowQuantity: true;
+              }
+            }
+
+            ItemSlotButton #Pack21 {
+              Anchor: (Width: 58, Height: 58, Right: 2);
+              Background: #243447;
+
+              ItemSlot #Pack21Icon {
+                Anchor: (Full: 0);
+                ShowQualityBackground: true;
+                ShowDurabilityBar: true;
+                ShowQuantity: true;
+              }
+            }
+
+            ItemSlotButton #Pack22 {
+              Anchor: (Width: 58, Height: 58, Right: 2);
+              Background: #243447;
+
+              ItemSlot #Pack22Icon {
+                Anchor: (Full: 0);
+                ShowQualityBackground: true;
+                ShowDurabilityBar: true;
+                ShowQuantity: true;
+              }
+            }
+
+            ItemSlotButton #Pack23 {
+              Anchor: (Width: 58, Height: 58, Right: 2);
+              Background: #243447;
+
+              ItemSlot #Pack23Icon {
+                Anchor: (Full: 0);
+                ShowQualityBackground: true;
+                ShowDurabilityBar: true;
+                ShowQuantity: true;
+              }
+            }
+
+            ItemSlotButton #Pack24 {
+              Anchor: (Width: 58, Height: 58, Right: 2);
+              Background: #243447;
+
+              ItemSlot #Pack24Icon {
+                Anchor: (Full: 0);
+                ShowQualityBackground: true;
+                ShowDurabilityBar: true;
+                ShowQuantity: true;
+              }
+            }
+
+            ItemSlotButton #Pack25 {
+              Anchor: (Width: 58, Height: 58, Right: 2);
+              Background: #243447;
+
+              ItemSlot #Pack25Icon {
+                Anchor: (Full: 0);
+                ShowQualityBackground: true;
+                ShowDurabilityBar: true;
+                ShowQuantity: true;
+              }
+            }
+
+            ItemSlotButton #Pack26 {
+              Anchor: (Width: 58, Height: 58, Right: 2);
+              Background: #243447;
+
+              ItemSlot #Pack26Icon {
+                Anchor: (Full: 0);
+                ShowQualityBackground: true;
+                ShowDurabilityBar: true;
+                ShowQuantity: true;
+              }
+            }
+
+          }
+
+          Group #LayaRow3 {
+            Anchor: (Height: 60);
+            LayoutMode: Left;
+
+            ItemSlotButton #Pack27 {
+              Anchor: (Width: 58, Height: 58, Right: 2);
+              Background: #243447;
+
+              ItemSlot #Pack27Icon {
+                Anchor: (Full: 0);
+                ShowQualityBackground: true;
+                ShowDurabilityBar: true;
+                ShowQuantity: true;
+              }
+            }
+
+            ItemSlotButton #Pack28 {
+              Anchor: (Width: 58, Height: 58, Right: 2);
+              Background: #243447;
+
+              ItemSlot #Pack28Icon {
+                Anchor: (Full: 0);
+                ShowQualityBackground: true;
+                ShowDurabilityBar: true;
+                ShowQuantity: true;
+              }
+            }
+
+            ItemSlotButton #Pack29 {
+              Anchor: (Width: 58, Height: 58, Right: 2);
+              Background: #243447;
+
+              ItemSlot #Pack29Icon {
+                Anchor: (Full: 0);
+                ShowQualityBackground: true;
+                ShowDurabilityBar: true;
+                ShowQuantity: true;
+              }
+            }
+
+            ItemSlotButton #Pack30 {
+              Anchor: (Width: 58, Height: 58, Right: 2);
+              Background: #243447;
+
+              ItemSlot #Pack30Icon {
+                Anchor: (Full: 0);
+                ShowQualityBackground: true;
+                ShowDurabilityBar: true;
+                ShowQuantity: true;
+              }
+            }
+
+            ItemSlotButton #Pack31 {
+              Anchor: (Width: 58, Height: 58, Right: 2);
+              Background: #243447;
+
+              ItemSlot #Pack31Icon {
+                Anchor: (Full: 0);
+                ShowQualityBackground: true;
+                ShowDurabilityBar: true;
+                ShowQuantity: true;
+              }
+            }
+
+            ItemSlotButton #Pack32 {
+              Anchor: (Width: 58, Height: 58, Right: 2);
+              Background: #243447;
+
+              ItemSlot #Pack32Icon {
+                Anchor: (Full: 0);
+                ShowQualityBackground: true;
+                ShowDurabilityBar: true;
+                ShowQuantity: true;
+              }
+            }
+
+            ItemSlotButton #Pack33 {
+              Anchor: (Width: 58, Height: 58, Right: 2);
+              Background: #243447;
+
+              ItemSlot #Pack33Icon {
+                Anchor: (Full: 0);
+                ShowQualityBackground: true;
+                ShowDurabilityBar: true;
+                ShowQuantity: true;
+              }
+            }
+
+            ItemSlotButton #Pack34 {
+              Anchor: (Width: 58, Height: 58, Right: 2);
+              Background: #243447;
+
+              ItemSlot #Pack34Icon {
+                Anchor: (Full: 0);
+                ShowQualityBackground: true;
+                ShowDurabilityBar: true;
+                ShowQuantity: true;
+              }
+            }
+
+            ItemSlotButton #Pack35 {
+              Anchor: (Width: 58, Height: 58, Right: 2);
+              Background: #243447;
+
+              ItemSlot #Pack35Icon {
+                Anchor: (Full: 0);
+                ShowQualityBackground: true;
+                ShowDurabilityBar: true;
+                ShowQuantity: true;
+              }
+            }
+
+          }
+
+          $C.@TextButton #SortButton {
+            Anchor: (Top: 8, Width: 230, Height: 40);
+            Text: "Stack & Sort";
+          }
+        }
+
+        Group #Gear {
+          Anchor: (Width: 96, Height: 310, Left: 10);
+          LayoutMode: Top;
+          Label #GearLabel {
+            Text: "Equipped";
+            Style: (FontSize: 16, RenderBold: true, TextColor: #FFFFFF);
+          }
+
+          ItemSlotButton #Gear0 {
+            Anchor: (Width: 58, Height: 58, Top: 2, Left: 0);
+            Background: #243447;
+
+            ItemSlot #Gear0Icon {
+              Anchor: (Full: 0);
+              ShowQualityBackground: true;
+              ShowDurabilityBar: true;
+              ShowQuantity: true;
+              TooltipText: "Head";
+            }
+          }
+
+          ItemSlotButton #Gear1 {
+            Anchor: (Width: 58, Height: 58, Top: 2, Left: 0);
+            Background: #243447;
+
+            ItemSlot #Gear1Icon {
+              Anchor: (Full: 0);
+              ShowQualityBackground: true;
+              ShowDurabilityBar: true;
+              ShowQuantity: true;
+              TooltipText: "Chest";
+            }
+          }
+
+          ItemSlotButton #Gear2 {
+            Anchor: (Width: 58, Height: 58, Top: 2, Left: 0);
+            Background: #243447;
+
+            ItemSlot #Gear2Icon {
+              Anchor: (Full: 0);
+              ShowQualityBackground: true;
+              ShowDurabilityBar: true;
+              ShowQuantity: true;
+              TooltipText: "Hands";
+            }
+          }
+
+          ItemSlotButton #Gear3 {
+            Anchor: (Width: 58, Height: 58, Top: 2, Left: 0);
+            Background: #243447;
+
+            ItemSlot #Gear3Icon {
+              Anchor: (Full: 0);
+              ShowQualityBackground: true;
+              ShowDurabilityBar: true;
+              ShowQuantity: true;
+              TooltipText: "Legs";
+            }
+          }
+
+          ItemSlotButton #Gear4 {
+            Anchor: (Width: 58, Height: 58, Top: 2, Left: 0);
+            Background: #243447;
+
+            ItemSlot #Gear4Icon {
+              Anchor: (Full: 0);
+              ShowQualityBackground: true;
+              ShowDurabilityBar: true;
+              ShowQuantity: true;
+              TooltipText: "Shield";
+            }
+          }
+
+        }
+      }
+    }
+  }
+}

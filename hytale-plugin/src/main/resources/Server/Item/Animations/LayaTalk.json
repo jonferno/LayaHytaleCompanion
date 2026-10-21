@@ -1,0 +1,19 @@
+{
+  "Animations": {
+    "Talk": {
+      "ThirdPerson": "Characters/Animations/Expressions/Talk/Talk.blockyanim",
+      "ThirdPersonFace": "Characters/Animations/Expressions/Talk/Talk.blockyanim",
+      "Looping": true
+    }
+  },
+  "WiggleWeights": {
+    "Pitch": 2,
+    "PitchDeceleration": 0.1,
+    "Roll": 0.1,
+    "RollDeceleration": 0.1,
+    "X": 3,
+    "XDeceleration": 0.1,
+    "Y": 0.1,
+    "YDeceleration": 0.1
+  }
+}

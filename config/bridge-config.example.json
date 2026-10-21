@@ -1,0 +1,23 @@
+{
+  "groq_api_key": "",
+  "google_api_key": "",
+  "zai_api_key": "",
+  "groq_models": [
+    "openai/gpt-oss-120b",
+    "qwen/qwen3.8-27b",
+    "openai/gpt-oss-20b"
+  ],
+  "google_model": "gemini-flash-latest",
+  "llm_temperature": 0.8,
+  "llm_max_tokens": 128,
+  "llm_stream": false,
+  "tts_engine": "kokoro",
+  "tts_voice": "af_heart",
+  "tts_speed": 1.0,
+  "tts_enabled": true,
+  "decision_engine": "laya",
+  "vision_enabled": false,
+  "talk_key": "x",
+  "tp_key": "f8",
+  "plugin_bridge_url": "http://127.0.0.1:8787/command"
+}
