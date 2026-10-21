@@ -2,6 +2,7 @@
 param(
     [string]$HytalePath = "",
     [switch]$SkipModels,
+    [switch]$SkipKokoro,
     [switch]$SkipPython
 )
 
@@ -116,9 +117,11 @@ if (-not $SkipPython) {
 }
 
 if (-not $SkipModels) {
-    Write-Step "Downloading local speech models"
+    Write-Step "Downloading optional local speech models"
     $python = Get-Command python -ErrorAction Stop
-    & $python.Source (Join-Path $Root "download-models.py")
+    $modelArgs = @()
+    if ($SkipKokoro) { $modelArgs += "--skip-kokoro" }
+    & $python.Source (Join-Path $Root "download-models.py") @modelArgs
 } else {
     Write-Host "  Skipping model download (-SkipModels)"
 }

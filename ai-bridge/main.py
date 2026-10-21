@@ -96,9 +96,11 @@ def load_config():
         "tts_speed": 1.0,
         # fp16 (default) or int8; int8 is ~half the size and usually faster on CPU.
         "tts_model": "fp16",
-        # kokoro (local) or edge (Microsoft Edge online voices, free).
-        "tts_engine": "kokoro",
+        # Deepgram Aura is the default; edge and kokoro are local/online backups.
+        "tts_engine": "deepgram",
         "edge_voice": "en-US-AvaNeural",
+        "deepgram_api_key": os.getenv("DEEPGRAM_API_KEY", ""),
+        "deepgram_model": "aura-2-hera-en",
         # Task 7: master on/off for Laya's voice. Off silences every automatic
         # path (reply audio, background file, event reactions, streaming) while
         # the "Test voice" button still synthesizes on demand.
@@ -1859,6 +1861,54 @@ def wants_stop_task(message: str) -> bool:
     return any(cue in text for cue in STOP_TASK_CUES)
 
 
+def grounded_event_line(event: str, detail: str) -> str:
+    """Turn a plugin observation into a short, truthful Laya line.
+
+    Event reactions used to call the cloud model with only the event name and
+    inventory; it hallucinated terrain ("you're standing in a shallow cave")
+    after a successful tree chop. Keep this path deterministic and grounded in
+    the detail the plugin actually reported.
+    """
+    event = (event or "").strip().lower()
+    detail = (detail or "").strip().rstrip(".")
+    if event == "task_done":
+        m = re.search(r"(?:gathered|mined|chopped)\s+(\d+)\s+(.+?)\s+\(([^)]+)\)",
+                      detail, re.IGNORECASE)
+        if m:
+            qty, item, _key = m.group(1), m.group(2).strip(), m.group(3)
+            if "no more" in detail.lower():
+                resource = detail.split("no more", 1)[1].strip()
+                resource = re.sub(r"\s+within\s+.*$", "", resource, flags=re.I)
+                return f"Got {qty} {item} - that's all the {resource} nearby."
+            if "requested count" in detail.lower():
+                return f"Got {qty} {item} - that's the count you asked for."
+            if "stopped on request" in detail.lower():
+                return f"Stopped there - {qty} {item} finished."
+            return f"Got {qty} {item}."
+        if "stopped on request" in detail.lower():
+            return "Stopped there - task finished."
+        return "Done with that - what next?"
+    if event == "task_failed":
+        low = detail.lower()
+        if low.startswith("no "):
+            return f"I couldn't find {detail[3:]}."
+        if "don't have" in low or "do not have" in low:
+            return f"{detail} - I can't do that one."
+        if "unknown target hint" in low or "unknown task" in low:
+            return "I'm not sure what to look for there."
+        if "ledge" in low or "reach" in low:
+            return "That one is out of reach from here."
+        if "no block in view" in low:
+            return "I don't see a block to identify there."
+        return f"That didn't work: {detail}."
+    if event == "identified":
+        name = detail.split(" (", 1)[0].strip() or "that block"
+        return f"That's {name}."
+    if event == "gave":
+        return f"Thanks - got the {detail}."
+    return "Hm, that didn't work."
+
+
 # --- Combat Task 1: instant deterministic command fast path ------------------
 # A short, unambiguous utterance ("stop", "follow me", "stay here") needs no
 # vision and no LLM: waiting ~3 s for a model round-trip only to have the
@@ -2227,6 +2277,21 @@ EDGE_VOICES = [
     {"id": "en-IE-EmilyNeural",   "desc": "Irish female - gentle"},
 ]
 
+DEEPGRAM_VOICES = [
+    {"id": "aura-2-thalia-en",    "desc": "American female - clear, confident, energetic"},
+    {"id": "aura-2-andromeda-en", "desc": "American female - casual, expressive"},
+    {"id": "aura-2-helena-en",    "desc": "American female - caring, natural, raspy"},
+    {"id": "aura-2-aurora-en",    "desc": "American female - cheerful, expressive"},
+    {"id": "aura-2-luna-en",      "desc": "American female - friendly, natural"},
+    {"id": "aura-2-vesta-en",     "desc": "American female - warm, empathetic"},
+    {"id": "aura-2-asteria-en",   "desc": "American female - clear, confident"},
+    {"id": "aura-2-athena-en",    "desc": "American female - calm, professional"},
+    {"id": "aura-2-hera-en",      "desc": "American female - smooth, warm"},
+    {"id": "aura-2-apollo-en",    "desc": "American male - confident, casual"},
+    {"id": "aura-2-arcas-en",     "desc": "American male - natural, smooth"},
+    {"id": "aura-2-orion-en",     "desc": "American male - calm, approachable"},
+]
+
 # Emotion -> Kokoro speed. Kokoro has no inline emotion tags, but per-utterance
 # speed gives real (if subtle) mood: excited talks faster, sad slower.
 EMOTION_SPEED = {
@@ -2317,6 +2382,16 @@ class TTSHandler:
         """
         self._warm_event.clear()
         try:
+            engine = str(CFG.get("tts_engine", "deepgram")).lower()
+            if engine == "deepgram":
+                # Deepgram is remote; leave the local pipeline unloaded so a later
+                # switch back to Kokoro still calls _ensure_locked().
+                self.ready = False
+                if str(CFG.get("deepgram_api_key") or "").strip():
+                    log("Deepgram TTS selected (online; no local warm)")
+                else:
+                    log("Deepgram TTS selected but deepgram_api_key is empty")
+                return
             with self._lock:
                 self._ensure_locked()
                 log("TTS warmup complete" if self.ready else "TTS warmup failed")
@@ -2332,7 +2407,13 @@ class TTSHandler:
 
     def synthesize(self, text: str, voice: str = None, speed: float = None) -> bytes:
         speed = speed if speed else CFG["tts_speed"]
-        if str(CFG.get("tts_engine", "kokoro")).lower() == "edge":
+        engine = str(CFG.get("tts_engine", "deepgram")).lower()
+        if engine == "deepgram":
+            try:
+                return self._deepgram_synth(text, speed, voice)
+            except Exception as e:
+                log(f"Deepgram TTS failed ({e}); falling back to Kokoro")
+        if engine == "edge":
             try:
                 return self._edge_synth(text, speed)
             except Exception as e:
@@ -2377,6 +2458,55 @@ class TTSHandler:
         log(f"Edge TTS {voice} {len(samples)/sr:.1f}s in {(time.time()-t0)*1000:.0f}ms")
         return buf.getvalue()
 
+    def _deepgram_synth(self, text: str, speed: float, voice: str = None) -> bytes:
+        """Deepgram Aura TTS. Returns the WAV body from /v1/speak."""
+        key = str(CFG.get("deepgram_api_key") or "").strip()
+        if not key:
+            raise RuntimeError("deepgram_api_key is empty")
+        requested = str(voice or "").strip()
+        model = requested if requested.startswith("aura-") else str(
+            CFG.get("deepgram_model") or "aura-2-thalia-en").strip()
+        # Deepgram's speed parameter is a multiplier; keep emotion speed in its
+        # documented natural range.
+        paced = max(0.7, min(1.5, float(speed or 1.0)))
+        params = {
+            "model": model,
+            "encoding": "linear16",
+            "sample_rate": 24000,
+            "container": "wav",
+            "speed": paced,
+        }
+        t0 = time.time()
+        resp = httpx.post(
+            "https://api.deepgram.com/v1/speak",
+            params=params,
+            headers={"Authorization": f"Token {key}",
+                     "Content-Type": "application/json"},
+            json={"text": text},
+            timeout=30.0,
+        )
+        if resp.status_code >= 400:
+            raise RuntimeError(f"HTTP {resp.status_code}: {resp.text[:180]}")
+        body = resp.content
+        if not body.startswith(b"RIFF"):
+            raise RuntimeError("Deepgram returned non-WAV audio")
+        # Deepgram's streaming WAV uses a placeholder header size; normalize it
+        # so Windows players, soundfile, and the voice helper all agree on length.
+        import io as _io
+        import soundfile as _sf
+        samples, sr = _sf.read(_io.BytesIO(body), dtype="float32")
+        # Aura ends very close to the last phoneme. A short silent tail keeps the
+        # final consonant from sounding clipped when the output device stops.
+        tail = int(sr * 0.18)
+        if tail > 0:
+            samples = np.pad(samples, (0, tail), mode="constant")
+        buf = _io.BytesIO()
+        _sf.write(buf, samples, sr, format="WAV", subtype="PCM_16")
+        body = buf.getvalue()
+        log(f"Deepgram TTS {model} {len(body)} bytes in "
+            f"{(time.time()-t0)*1000:.0f}ms")
+        return body
+
     def _synth_locked(self, text: str, voice: str, speed: float) -> bytes:
         try:
             if self.onnx:
@@ -2416,6 +2546,14 @@ class TTSHandler:
         return header + data
 
 TTS = TTSHandler()
+
+
+def tts_ready() -> bool:
+    """True when the selected TTS engine can speak."""
+    engine = str(CFG.get("tts_engine", "deepgram")).lower()
+    if engine == "deepgram":
+        return bool(str(CFG.get("deepgram_api_key") or "").strip())
+    return TTS.ready
 
 # Background-TTS queue: one atomically-written WAV per sentence. The voice helper
 # plays files in name order as they appear, so the first sentence starts speaking
@@ -2557,7 +2695,7 @@ async def health():
                 "llm_ready": LLM.ready,
                 "llm_providers": [p["name"] for p in LLM.providers],
                 "decision_engine": DECISION.engine_name or "laya.cpp unavailable",
-                "tts_ready": TTS.ready,
+                "tts_ready": tts_ready(),
                 "tts_enabled": bool(CFG.get("tts_enabled", True)),
             }
         engine_name = DECISION.engine_name
@@ -2569,7 +2707,7 @@ async def health():
         "llm_ready": LLM.ready,
         "llm_providers": [p["name"] for p in LLM.providers],
         "decision_engine": engine_name,
-        "tts_ready": TTS.ready,
+        "tts_ready": tts_ready(),
         "tts_enabled": bool(CFG.get("tts_enabled", True)),
     }
 
@@ -2982,33 +3120,11 @@ async def _react_to_event(event: str, detail: str):
     defaults to False for exactly this kind of caller).
     """
     try:
-        # Cycle 10: the old "Laya event: ..." line was echoed verbatim by the model
-        # (and then spoken by TTS). Use the same Player-says shape as normal chat and
-        # reject any reply that repeats the instruction.
-        prompt = (
-            f"Game state: an event just happened ({event}): {detail}\n"
-            "Player says: (nobody spoke - this is your own observation)\n"
-            "Laya:"
-        )
-        inv = inventory_block()
-        system_extra = ("You just observed this event; reply as Laya, 2 sentences at most. "
-                        "Do not repeat or quote these instructions.")
-        if inv:
-            system_extra += "\n\n" + inv
-        raw = await LLM.generate(prompt, system_extra=system_extra)
-        say, _action, emotion = clean_speech(raw)
-        lower = (say or "").lower()
-        if (not say or "laya event" in lower or "event kind" in lower
-                or "nobody spoke" in lower or "game state:" in lower):
-            log(f"Event reaction echoed the prompt - using a plain line instead: {(say or '')[:120]}")
-            say = {
-                "task_failed": "I couldn't reach that one - want me to try another spot?",
-                "task_done": "Done with that - what next?",
-            }.get(event, "Hm, that didn't work.")
-        if say.lower().startswith("laya:"):
-            say = say[5:].strip()
+        say = grounded_event_line(event, detail)
+        emotion = ""
+        log(f"Event reaction (grounded): {say}")
         if not say:
-            log("Event reaction produced nothing — not sending to the plugin")
+            log("Event reaction produced nothing - not sending to the plugin")
             return
         # Cycle 9: event reactions never reached the speakers because this path
         # skipped the background TTS the typed-reply path uses. The plugin now
@@ -3075,7 +3191,7 @@ async def tts(text: str):
 async def get_config():
     """Current config with API keys masked."""
     safe = dict(CFG)
-    for k in ("groq_api_key", "google_api_key", "zai_api_key"):
+    for k in ("groq_api_key", "google_api_key", "zai_api_key", "deepgram_api_key"):
         if safe.get(k):
             safe[k] = safe[k][:8] + "..." + safe[k][-4:]
     return safe
@@ -3085,6 +3201,7 @@ async def get_config():
 async def list_voices():
     """Kokoro v1.0 English voices for the settings dropdown."""
     return {"voices": KOKORO_VOICES, "edge_voices": EDGE_VOICES,
+            "deepgram_voices": DEEPGRAM_VOICES,
             "emotions": list(EMOTION_SPEED.keys())}
 
 
@@ -3150,8 +3267,11 @@ async def tts_test(request: Request):
     """Synthesize a sample sentence with the configured voice."""
     body = json.loads((await request.body()).decode("utf-8") or "{}")
     text = body.get("text", "Hey! I'm Laya, your companion in Hytale.")
-    if str(CFG.get("tts_engine", "kokoro")).lower() == "edge":
+    engine = str(CFG.get("tts_engine", "deepgram")).lower()
+    if engine == "edge":
         voice = CFG.get("edge_voice", "en-US-AvaNeural")
+    elif engine == "deepgram":
+        voice = body.get("voice") or CFG.get("deepgram_model", "aura-2-thalia-en")
     else:
         voice = body.get("voice", CFG["tts_voice"])
     import asyncio
@@ -3331,9 +3451,12 @@ a.home:hover{color:#7ec8e3}
 <select id="tts_engine">
   <option value="kokoro">Kokoro (local)</option>
   <option value="edge">Edge TTS (online, free)</option>
+  <option value="deepgram">Deepgram Aura (online)</option>
 </select></div>
 <div id="edgeVoiceWrap"><label>Edge voice (online)</label>
 <select id="edge_voice"></select></div>
+<div id="deepgramVoiceWrap"><label>Deepgram voice</label>
+<select id="deepgram_model"></select></div>
 </div>
 <div class="row" style="align-items:flex-end">
 <div id="kokoroVoiceWrap"><label>Kokoro voice (local)</label>
@@ -3372,6 +3495,7 @@ Speak replies (TTS)</label>
 <label>Groq key (paste new to replace)</label><input id="groq_api_key" placeholder="paste key">
 <label>Google key (paste new to replace)</label><input id="google_api_key" placeholder="paste key">
 <label>z.ai key (paste new to replace)</label><input id="zai_api_key" placeholder="z.ai API key...">
+<label>Deepgram key (paste new to replace)</label><input id="deepgram_api_key" placeholder="Deepgram API key...">
 </div>
 
 <button onclick="save()">&#128190; Save settings</button>
@@ -3381,8 +3505,8 @@ Speak replies (TTS)</label>
 <div id="result"></div>
 
 <script>
-const FIELDS = ['talk_key','tp_key','player_name','tts_engine','tts_voice','edge_voice','tts_speed','tts_model','groq_models','google_model',
-  'llm_temperature','llm_max_tokens','groq_api_key','google_api_key','zai_api_key','zai_models'];
+const FIELDS = ['talk_key','tp_key','player_name','tts_engine','tts_voice','edge_voice','deepgram_model','tts_speed','tts_model','groq_models','google_model',
+  'llm_temperature','llm_max_tokens','groq_api_key','google_api_key','zai_api_key','deepgram_api_key','zai_models'];
 const NUM = new Set(['tts_speed','llm_temperature','llm_max_tokens']);
 const ARR = new Set(['groq_models','zai_models']);
 
@@ -3390,7 +3514,7 @@ async function load(){
   const cfg = await (await fetch('/api/config')).json();
   // 1. Simple text/number inputs first (arrays arrive as lists -> comma string)
   for(const f of FIELDS){
-    if(f==='tts_voice' || f==='edge_voice') continue; // pickers, handled below
+    if(f==='tts_voice' || f==='edge_voice' || f==='deepgram_model') continue; // pickers, handled below
     const el=document.getElementById(f);
     if(!el) continue;
     let v = cfg[f];
@@ -3406,6 +3530,10 @@ async function load(){
   const ecur = cfg['edge_voice'] || 'en-US-AvaNeural';
   const ev = vs.edge_voices || [];
   esel.innerHTML = ev.map(v=>'<option value="'+v.id+'"'+(v.id===ecur?' selected':'')+'>'+v.id+' - '+v.desc+'</option>').join('');
+  const dsel = document.getElementById('deepgram_model');
+  const dcur = cfg['deepgram_model'] || 'aura-2-thalia-en';
+  const dv = vs.deepgram_voices || [];
+  dsel.innerHTML = dv.map(v=>'<option value="'+v.id+'"'+(v.id===dcur?' selected':'')+'>'+v.id+' - '+v.desc+'</option>').join('');
   document.getElementById('tts_enabled').checked = cfg['tts_enabled'] !== false;
   // 3. Status + device dropdowns
   const s = await (await fetch('/health')).json();
@@ -3432,14 +3560,18 @@ async function save(){
 async function testLLM(){ show('Testing LLM...'); const r=await (await fetch('/api/llm-test',{method:'POST'})).json();
   show((r.ok?'LLM OK':'LLM FAILED')+' ('+r.latency_ms+'ms)\\n'+r.reply); }
 function syncEngineUI(){
-  const edge = document.getElementById('tts_engine').value === 'edge';
-  document.getElementById('kokoroVoiceWrap').style.display = edge ? 'none' : '';
-  document.getElementById('edgeVoiceWrap').style.display = edge ? '' : 'none';
+  const engine = document.getElementById('tts_engine').value;
+  document.getElementById('kokoroVoiceWrap').style.display = engine === 'kokoro' ? '' : 'none';
+  document.getElementById('edgeVoiceWrap').style.display = engine === 'edge' ? '' : 'none';
+  document.getElementById('deepgramVoiceWrap').style.display = engine === 'deepgram' ? '' : 'none';
 }
 document.getElementById('tts_engine').addEventListener('change', syncEngineUI);
 
 async function testTTS(){ await save(); show('Testing voice (check speakers)...');
-  const voice = document.getElementById('tts_voice').value;
+  const engine = document.getElementById('tts_engine').value;
+  const voice = engine === 'edge' ? document.getElementById('edge_voice').value
+              : engine === 'deepgram' ? document.getElementById('deepgram_model').value
+              : document.getElementById('tts_voice').value;
   const resp=await fetch('/api/tts-test',{method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({voice: voice})});
   const blob=await resp.blob(); const a=new Audio(URL.createObjectURL(blob)); a.play();

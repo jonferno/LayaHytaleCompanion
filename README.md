@@ -33,9 +33,12 @@ pause. The speed comes from the architecture, not a single trick:
 
 - **The decision engine is resident.** `laya.cpp` starts once and stays warm on
   its own port. A turn does not load a model or restart a process.
-- **Speech runs on ONNX.** Kokoro TTS and Parakeet STT use ONNX Runtime instead
-  of a per-turn PyTorch warm-up. The models are warmed in the background at
-  startup.
+- **Deepgram Aura is the default voice.** It sounds the best in testing, and
+  the first sentence is synthesized in roughly 1-3 seconds. Edge and Kokoro are
+  fallback voice options.
+- **Local speech is optional.** Kokoro TTS and Parakeet STT can run on ONNX
+  Runtime with no per-turn PyTorch warm-up. Kokoro's ~1 GB of local models are
+  not required while Deepgram is the selected engine.
 - **Cloud replies stream.** Groq can stream the reply while the first sentence
   is already being turned into speech, so the player hears Laya before the full
   answer has finished generating.
@@ -63,6 +66,25 @@ message. Exact numbers depend on the provider, GPU, and whether vision is used.
 - Look at the player's screen when asked to, when screen vision is configured.
 - Start fresh for each new player: no bundled keys, inventory, memory, or skin.
 
+## Voice: Deepgram first
+
+**Deepgram Aura is the first-choice TTS engine.** It sounded the best in
+side-by-side testing, so it is the default voice path and the current default
+voice is `aura-2-hera-en`.
+
+The project has **$200 of Deepgram starter credits**, which will last a long
+time at normal companion use. Deepgram is usage-based after that; you can swap
+to the free/local options at any time in Settings.
+
+The other engines are backups:
+
+- **Edge TTS** - free online Microsoft voices, no local models.
+- **Kokoro** - local ONNX voice, fully offline once installed.
+
+The roughly **1 GB Kokoro/Parakeet model download is optional**. You only need
+it for Kokoro TTS or local microphone speech recognition; Deepgram does not
+need those models.
+
 ## Install
 
 ### Requirements
@@ -72,8 +94,13 @@ message. Exact numbers depend on the provider, GPU, and whether vision is used.
 - Python 3.11
 - A Windows Vulkan build of `laya.cpp` plus the `typed-decisions` checkpoint
 - Java 25 only if you build the plugin yourself
-- An API key from Groq, Google AI Studio, or z.ai for cloud replies
-- About 1 GB free for the local speech models
+- **Free Groq API key** - [create one here](https://console.groq.com/keys)
+- **Free z.ai API key** - [create one here](https://z.ai/manage-apikey/apikey)
+- **Deepgram API key** - [$200 starter credits here](https://console.deepgram.com/api-keys)
+- Optional: about 1 GB for Kokoro TTS and Parakeet local speech recognition
+
+All three providers are free to start; Deepgram includes $200 of starter credits,
+which should last a long time at normal companion use.
 
 ### Quick start
 
@@ -98,12 +125,13 @@ message. Exact numbers depend on the provider, GPU, and whether vision is used.
    ```
 
    The installer asks for your Hytale folder (usually `D:\Games\Hytale`),
-   copies the plugin JAR, creates a local config with **empty keys**, installs
-   the Python dependencies, and downloads the speech models unless you pass
-   `-SkipModels`.
+   copies the plugin JAR, creates a local config with **empty keys**, and
+   installs the Python dependencies. It downloads the optional local speech
+   models unless you pass `-SkipModels`; Deepgram works without them. Use
+   `-SkipKokoro` to keep Parakeet STT but skip the Kokoro model.
 
-4. Run `start.bat`, open <http://127.0.0.1:8788>, and paste your API key into
-   the settings page. Save the settings.
+4. Run `start.bat`, open <http://127.0.0.1:8788>, and paste your API keys
+   (including Deepgram) into the settings page. Save the settings.
 5. Start Hytale. The installer sets the plugin's config paths as user
    environment variables, so restart Hytale once after the first install.
 6. In game, talk to Laya in chat or use `/laya`.
@@ -125,7 +153,8 @@ Hytale client
 Python AI bridge (ai-bridge/)
     - memory and prompt construction
     - Groq / Google / z.ai LLM clients
-    - Kokoro ONNX TTS + Parakeet ONNX STT
+    - Deepgram Aura TTS (default); Edge + Kokoro backups
+    - Parakeet ONNX STT for microphone input
     - resident laya.cpp decision server :8090
     v
 Hytale world state, speech, actions
@@ -161,6 +190,8 @@ does not contain machine-specific paths.
   `ai-bridge/laya/` are git-ignored.
 - The bridge listens on localhost only by default.
 - API keys are only sent to the provider you configure.
+- The default Deepgram voice sends response text to Deepgram's API. Switch to
+  Kokoro or Edge in Settings if you want a different voice/privacy tradeoff.
 - This repository starts with a fresh history. Do not merge private development
   branches that contain old config or keys.
 
@@ -168,8 +199,8 @@ does not contain machine-specific paths.
 
 Plugin and bridge code by [Jonferno](https://github.com/jonferno). Built with
 Hytale's plugin API, [laya.cpp](https://github.com/lkarlslund/laya.cpp),
-FastAPI, Kokoro, Parakeet, and the Hytale modding community. See each upstream
-project for its license.
+[Deepgram Aura](https://deepgram.com/), FastAPI, Kokoro, Parakeet, and the
+Hytale modding community. See each upstream project for its license.
 
 ### 100% vibe coded
 

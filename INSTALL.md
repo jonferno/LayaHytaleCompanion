@@ -6,6 +6,12 @@
 - Install Python 3.11 from <https://www.python.org/downloads/>. Tick **Add
   Python to PATH** during installation.
 - Java 25 is only needed if you build the plugin from source.
+- Deepgram Aura is the default voice and needs a Deepgram API key.
+- Free API keys: [Groq](https://console.groq.com/keys),
+  [z.ai](https://z.ai/manage-apikey/apikey), and
+  [Deepgram](https://console.deepgram.com/api-keys).
+- Kokoro TTS and Parakeet STT are optional local backups; their ~1 GB model
+  download is not required for Deepgram.
 
 ## 2. Install the required laya.cpp engine
 
@@ -40,8 +46,11 @@ Useful options:
 # Hytale is somewhere other than D:\Games\Hytale
 .\install.ps1 -HytalePath "C:\Games\Hytale"
 
-# Skip the ~1 GB model download for now
+# Skip the optional ~1 GB local speech models (Deepgram still works)
 .\install.ps1 -SkipModels
+
+# Keep Parakeet STT but skip the optional Kokoro TTS model
+.\install.ps1 -SkipKokoro
 
 # Skip pip because dependencies are already installed
 .\install.ps1 -SkipPython
@@ -69,8 +78,13 @@ Start the bridge:
 ```
 
 This opens <http://127.0.0.1:8788>. Paste a Groq, Google AI Studio, or z.ai key
-into the settings page and save. You only need one provider. The key is written
-to `config\bridge-config.json` on your machine and is never part of the repo.
+for the brain, and a Deepgram key for the default voice. You only need one LLM
+provider. The keys are written to `config\bridge-config.json` on your machine
+and are never part of the repo.
+
+Deepgram is the first-choice voice because it sounded the best in testing. The
+project has $200 of starter credits; Edge and Kokoro are fallback voices, and
+Kokoro's local models are optional.
 
 If you prefer to edit the file directly, copy
 `config\bridge-config.example.json` to `config\bridge-config.json` and fill in

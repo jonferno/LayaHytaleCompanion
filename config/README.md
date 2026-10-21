@@ -9,7 +9,7 @@ These files are safe to commit:
 
 These files are **personal and git-ignored**:
 
-- `bridge-config.json` - your API keys and local settings
+- `bridge-config.json` - your API keys (including Deepgram) and local settings
 - `laya-skin.json` - Laya's appearance
 - `laya-inventory.json` - Laya's inventory
 - `laya-combat.json` - health/downed state

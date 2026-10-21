@@ -12,6 +12,7 @@ The laya.cpp decision engine is required and must be installed separately.
 See INSTALL.md.
 """
 
+import argparse
 import sys
 import time
 import urllib.request
@@ -75,13 +76,19 @@ def download_parakeet() -> bool:
 
 
 def main() -> int:
+    parser = argparse.ArgumentParser(description="Download optional local speech models.")
+    parser.add_argument("--skip-kokoro", action="store_true",
+                        help="skip the Kokoro TTS model (Deepgram still works)")
+    args = parser.parse_args()
     print("=" * 60)
     print("  Laya Companion - model downloader")
     print("=" * 60)
     MODELS_DIR.mkdir(parents=True, exist_ok=True)
     LAYA_DIR.mkdir(parents=True, exist_ok=True)
 
-    results = [download_kokoro(), download_parakeet()]
+    kokoro_ok = True if args.skip_kokoro else download_kokoro()
+    parakeet_ok = download_parakeet()
+    results = [kokoro_ok, parakeet_ok]
 
     print("\nRequired decision engine")
     print("  laya.cpp is not downloaded automatically.")
@@ -95,7 +102,7 @@ def main() -> int:
         print("  [MISSING] laya.cpp is REQUIRED; the bridge will not start without it.")
 
     print("\nSummary")
-    print(f"  Kokoro:   {'OK' if results[0] else 'MISSING'}")
+    print(f"  Kokoro:   {'SKIPPED' if args.skip_kokoro else ('OK' if results[0] else 'MISSING')}")
     print(f"  Parakeet: {'OK' if results[1] else 'MISSING'}")
     print(f"  laya.cpp: {'OK' if laya_ok else 'MISSING (required)'}")
     print("\nNext: start the bridge with start.bat and add an API key in Settings.")
