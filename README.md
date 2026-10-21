@@ -177,3 +177,9 @@ This project was **100% vibe coded** with
 [DeepSeek V4.1](https://www.deepseek.com/) and
 [OpenCode](https://opencode.ai/). Huge thanks to both - they made building
 Laya an absolute joy.
+
+### Inspiration
+
+The original idea came from [chasmlol](https://github.com/chasmlol) and his
+Halo CE "Kev" video. Thanks for the spark:
+[YouTube - chasmlol](https://www.youtube.com/@chasmlol).
