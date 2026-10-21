@@ -112,12 +112,6 @@ See [INSTALL.md](INSTALL.md) for manual setup, the required `laya.cpp` engine,
 troubleshooting, and `reset-data.ps1` for a clean inventory, memory, and
 appearance.
 
-## Media
-
-Replace `assets/banner.svg` with your own banner and add screenshots or clips
-under `assets/`. The banner is the top bar of this README; GitHub's social
-preview can use the same image from **Settings -> Social preview**.
-
 ## How it works
 
 ```text
