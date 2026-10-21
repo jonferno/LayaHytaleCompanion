@@ -57,8 +57,9 @@ See [INSTALL.md](INSTALL.md) for details, manual setup, and troubleshooting.
 
 ## Building the plugin
 
-The repository ships `dist/LayaPlugin-0.2.0.jar` for convenience. To rebuild it
-against your installed Hytale version:
+The repository ships `dist/LayaPlugin-0.2.0.jar` for convenience. It was built
+against the 0.7.x server API. If you updated Hytale and the plugin no longer
+loads, rebuild it against your installed server JAR. To rebuild:
 
 ```powershell
 $env:HYTALE_SERVER_JAR = "D:\Games\Hytale\install\release\package\game\latest\Server\HytaleServer.jar"

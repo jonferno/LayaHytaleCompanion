@@ -117,7 +117,10 @@ public class LayaPlugin extends JavaPlugin {
         try {
             java.util.Map<String, String> env = System.getenv();
             String logPath = env.getOrDefault("LAYA_LOG", "logs/laya-plugin.log");
-            java.nio.file.Path path = java.nio.file.Paths.get(logPath); java.nio.file.Files.createDirectories(path.getParent());
+            java.nio.file.Path path = java.nio.file.Paths.get(logPath); 
+            if (path.getParent() != null) {
+                java.nio.file.Files.createDirectories(path.getParent());
+            }
             String entry = line + System.lineSeparator();
             if (java.nio.file.Files.exists(path)) {
                 java.nio.file.Files.write(path, entry.getBytes(java.nio.charset.StandardCharsets.UTF_8),
