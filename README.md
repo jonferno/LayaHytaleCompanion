@@ -99,7 +99,7 @@ need those models.
 - **Deepgram API key** - [$200 starter credits here](https://console.deepgram.com/api-keys)
 - Optional: about 1 GB for Kokoro TTS and Parakeet local speech recognition
 
-All three providers are free to start; Deepgram includes $200 of starter credits,
+All three are **100% free to start**; Deepgram includes $200 of starter credits,
 which should last a long time at normal companion use.
 
 ### Quick start
