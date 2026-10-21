@@ -1084,6 +1084,7 @@ Group {
           Anchor: (Width: 96, Height: 310, Left: 10);
           LayoutMode: Top;
           Label #GearLabel {
+            Anchor: (Left: 6);
             Text: "Equipped";
             Style: (FontSize: 16, RenderBold: true, TextColor: #FFFFFF);
           }

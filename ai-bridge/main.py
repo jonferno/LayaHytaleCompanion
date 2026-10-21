@@ -471,6 +471,67 @@ def inventory_block() -> str:
             "carries and can use):\n" + "\n".join(lines))
 
 
+def gear_block(state: dict) -> str:
+    """Render the live held item / armor / appearance from the plugin snapshot.
+
+    This is deliberately separate from the pack dump: the held slot and the
+    equipped armor are the facts the model was missing when it denied holding
+    raw pork or ignored a request to ready the battleaxe.
+    """
+    laya = (state or {}).get("laya") or {}
+    if not isinstance(laya, dict):
+        return ""
+    pieces = []
+    held = str(laya.get("held_item") or "").strip()
+    if held:
+        slot = laya.get("held_slot")
+        slot_text = f" in hotbar slot {slot}" if isinstance(slot, int) and slot > 0 else ""
+        pieces.append(f"holding {friendly_item_name(held)}{slot_text}")
+    else:
+        pieces.append("hands empty")
+
+    armor = laya.get("armor") or {}
+    if isinstance(armor, dict):
+        for key, label in (("head", "head"), ("chest", "chest"),
+                           ("hands", "hands"), ("legs", "legs")):
+            item = str(armor.get(key) or "").strip()
+            if item:
+                pieces.append(f"{label}: {friendly_item_name(item)}")
+
+    offhand = str(laya.get("offhand") or "").strip()
+    if offhand:
+        pieces.append(f"offhand: {friendly_item_name(offhand)}")
+
+    appearance = str(laya.get("appearance") or "").strip()
+    if appearance:
+        pieces.append(f"appearance: {appearance}")
+
+    if not pieces:
+        return ""
+    return ("Laya's live equipment and appearance (authoritative; this is her "
+            "actual current state): " + "; ".join(pieces) + ".")
+
+
+def apply_stance_guard(message: str, action: str, say_line: str,
+                       fast: bool = False) -> tuple[str, str]:
+    """Apply a deterministic stance without discarding a real conversational reply.
+
+    Short commands are already handled by fast_command() and keep their canned
+    acknowledgement. For a longer sentence the model's line is the conversation;
+    the guard may still change the action, but must not replace that line with
+    "I've got your back." just because the text contains "defend".
+    """
+    if fast or action == "stop_task":
+        return action, say_line
+    stance = stance_intent(message)
+    if not stance:
+        return action, say_line
+    action = stance
+    if not (say_line or "").strip():
+        say_line = stance_ack(stance, message)
+    return action, say_line
+
+
 # ---------------------------------------------------------------------------
 # Validation error handler - logs exactly what was received
 # ---------------------------------------------------------------------------
@@ -1351,6 +1412,9 @@ def _cache_vision(png_path: str, desc: str):
 
 VISION_TRIGGERS = (
     "look at this", "look at that", "look here", "look around", "take a look",
+    "look through my eyes", "look through", "through my eyes", "see through my eyes",
+    "see what i see", "look where i'm looking", "look where im looking",
+    "look at me", "look at yourself", "look at your", "how do i look",
     "see this", "see that", "can you see", "do you see", "what do you see",
     "what's this", "what is this", "what's that", "what is that",
     "does this look", "does that look", "how does this look", "how does that look",
@@ -2589,12 +2653,24 @@ async def run_chat(player: str, message: str, state: dict, with_audio: bool,
     if knowledge:
         parts.append("Game knowledge (from Hytale's own data):\n" + "\n".join(f"- {k}" for k in knowledge))
     inv = ""
-    if re.search(r"\b(inventory|pack|weapon|armor|shield|pickaxe|hatchet|sword|axe|carrying|equipped|gear)\b",
-                 (message or "").lower()):
+    if re.search(
+            r"\b(inventory|pack|weapon|armor|shield|pickaxe|hatchet|sword|axe|axes|"
+            r"battleaxe|carrying|carry|holding|hold|held|hand|hands|equipped|"
+            r"equipment|gear|wield|wielding|pork|food|item)\b",
+            (message or "").lower()):
         inv = inventory_block()
     if inv:
         parts.append(inv)
-    parts.append(f"Game state: {state_json}\nPlayer says: {message}\nLaya:")
+    gear = gear_block(state)
+    if gear:
+        parts.append(gear)
+    parts.append(
+        "Use the live equipment/appearance line above for any question about "
+        "what Laya is holding, wearing, or looks like; do not deny or contradict "
+        "it. If the player says they see something, treat that observation as "
+        "true and respond to it naturally even when you have no vision line."
+    )
+    parts.append(f"Game state: {state_json}\n{player or 'Player'} says: {message}\nLaya:")
     prompt = "\n\n".join(parts)
 
     # Task 8 (vision): the system line is appended ONLY when a description came
@@ -2732,11 +2808,10 @@ async def run_chat(player: str, message: str, state: dict, with_audio: bool,
     # text decides, and the spoken line confirms it. A fast command already
     # holds the same deterministic result, so only non-fast messages re-derive.
     if not fast and action != "stop_task":
-        stance = stance_intent(message)
-        if stance:
-            log(f"Guard: stance cue -> action={stance}")
-            action = stance
-            say_line = stance_ack(stance, message)
+        guarded_action, guarded_say = apply_stance_guard(message, action, say_line)
+        if guarded_action != action:
+            log(f"Guard: stance cue -> action={guarded_action} (kept model line)")
+        action, say_line = guarded_action, guarded_say
 
     # Fix cycle 4b: `stay` only on an explicit cue. The follow ring is gated on
     # taskLive, so following through a task is safe and - if the task is refused -

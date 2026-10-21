@@ -45,7 +45,7 @@ public class ChatListener {
             return;
         }
 
-        String json = buildSnapshot(plugin);
+        String json = buildSnapshot(plugin, playerName);
         String body = "{\"player\":\"" + escapeJson(playerName) +
             "\",\"message\":\"" + escapeJson(message) +
             "\",\"state\":" + json + "}";
@@ -133,8 +133,14 @@ public class ChatListener {
         return sb.toString();
     }
 
-    private static String buildSnapshot(LayaPlugin plugin) {
-        return "{\"player\":{\"name\":\"player\"},\"nearby_entities\":[],\"time_of_day\":\"unknown\",\"laya\":{\"alive\":true}}";
+    private static String buildSnapshot(LayaPlugin plugin, String playerName) {
+        try {
+            return plugin.getNPCController().stateSnapshotJson(playerName);
+        } catch (Throwable t) {
+            LayaPlugin.log("State snapshot failed: " + t);
+            return "{\"player\":{\"name\":\"" + escapeJson(playerName)
+                + "\"},\"nearby_entities\":[],\"time_of_day\":\"unknown\",\"laya\":{}}";
+        }
     }
 
     private static String escapeJson(String s) {

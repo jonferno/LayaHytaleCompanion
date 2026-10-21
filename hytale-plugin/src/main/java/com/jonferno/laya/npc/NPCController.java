@@ -431,6 +431,72 @@ public class NPCController {
         return combat.stance();
     }
 
+    /**
+     * Live JSON state for one chat turn. The old ChatListener sent a hard-coded
+     * placeholder, so Laya could not know what she was holding or wearing.
+     * Keep this JSON small and factual; the AI bridge renders the important
+     * parts into the prompt.
+     */
+    public String stateSnapshotJson(String playerName) {
+        JsonObject root = new JsonObject();
+
+        JsonObject player = new JsonObject();
+        player.addProperty("name",
+            (playerName == null || playerName.isBlank()) ? "player" : playerName);
+        try {
+            Inventory pinv = playerInventory();
+            if (pinv != null && pinv.getHotbar() != null) {
+                int active = pinv.getActiveHotbarSlot();
+                if (active >= 0 && active < pinv.getHotbar().getCapacity()) {
+                    ItemStack held = pinv.getHotbar().getItemStack((short) active);
+                    player.addProperty("held_item",
+                        held == null ? "" : held.getItemId());
+                    player.addProperty("held_slot", active + 1);
+                }
+            }
+        } catch (Throwable ignored) {
+        }
+        root.add("player", player);
+
+        JsonObject laya = new JsonObject();
+        laya.addProperty("alive", !combat.isDowned());
+        laya.addProperty("health", combat.getLayaHp());
+        try {
+            if (npcEntity != null) {
+                Inventory inv = npcEntity.getInventory();
+                if (inv != null && inv.getHotbar() != null) {
+                    int active = inv.getActiveHotbarSlot();
+                    if (active >= 0 && active < inv.getHotbar().getCapacity()) {
+                        ItemStack held = inv.getHotbar().getItemStack((short) active);
+                        laya.addProperty("held_item",
+                            held == null ? "" : held.getItemId());
+                        laya.addProperty("held_slot", active + 1);
+                    }
+                }
+            }
+        } catch (Throwable ignored) {
+        }
+
+        JsonObject armor = new JsonObject();
+        String[] armorKeys = {"head", "chest", "hands", "legs"};
+        for (int i = 0; i < armorKeys.length; i++) {
+            String id = hudArmorId(i);
+            armor.addProperty(armorKeys[i], id == null ? "" : id);
+        }
+        laya.add("armor", armor);
+        String offhand = hudShieldId();
+        laya.addProperty("offhand", offhand == null ? "" : offhand);
+        laya.addProperty("appearance",
+            currentSkin == null ? "" : Appearance.summary(currentSkin));
+        String task = hudTask();
+        if (task != null) laya.addProperty("task", task);
+        root.add("laya", laya);
+
+        root.add("nearby_entities", new JsonArray());
+        root.addProperty("time_of_day", "unknown");
+        return root.toString();
+    }
+
     /** UI index: 0..7 hotbar, 8..35 storage, 36..39 armor, 40 utility[0]. */
     private Inventory playerInventory() {
         try {
