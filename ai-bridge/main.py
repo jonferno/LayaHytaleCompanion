@@ -99,9 +99,6 @@ def load_config():
         # kokoro (local) or edge (Microsoft Edge online voices, free).
         "tts_engine": "kokoro",
         "edge_voice": "en-US-AvaNeural",
-        # kokoro (local) or edge (Microsoft Edge online voices, free).
-        "tts_engine": "kokoro",
-        "edge_voice": "en-US-AvaNeural",
         # Task 7: master on/off for Laya's voice. Off silences every automatic
         # path (reply audio, background file, event reactions, streaming) while
         # the "Test voice" button still synthesizes on demand.

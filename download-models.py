@@ -26,7 +26,7 @@ KOKORO_BASE = (
     "model-files-v1.0"
 )
 KOKORO_FILES = ["kokoro-v1.0.fp16.onnx", "voices-v1.0.bin"]
-PARAKEET_REPO = "istupakov/parakeet-tdt-0.6b-v2"
+PARAKEET_REPO = "istupakov/parakeet-tdt-0.6b-v2-onnx"
 
 
 def download_url(url: str, target: Path) -> bool:
