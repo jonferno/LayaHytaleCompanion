@@ -4,7 +4,7 @@ Hybrid cloud approach, modeled on poker-coach's working pattern:
   - STT: Parakeet-tdt-0.6b-v2 (local CPU)
   - LLM: Groq (primary) + Google AI Studio (backup) via their respective APIs
   - TTS: Kokoro-82M (local GPU/CPU)
-  - Decisions: laya.cpp typed-decisions (Vulkan) or rule-based fallback
+  - Decisions: laya.cpp typed-decisions (Vulkan), required
 """
 
 import base64
@@ -169,9 +169,8 @@ LAYA_START_POLL_S = 0.5
 LAYA_START_BUDGET_S = 20.0
 # The spawned server process (subprocess.Popen) while it is ours; None otherwise.
 _LAYA_SERVER = None
-# Set once the startup spawn has finished (ready or given up). DecisionHandler
-# waits on this so the very first /chat or /health does not race a warming
-# server and pin the engine to the rule fallback for the whole session.
+# Set once the startup spawn has finished (ready or failed). DecisionHandler
+# waits on this so the first /chat or /health does not race a warming server.
 _LAYA_START_DONE = threading.Event()
 
 
@@ -181,17 +180,32 @@ def _brief_error(e: Exception) -> str:
     return " ".join(text.split())[:160]
 
 
-def _decision_engine_is_laya() -> bool:
-    """Task 4: is the laya.cpp engine selected?
-
-    Only the exact value "rule-based" turns laya.cpp off. Anything else -
-    including a missing key - keeps the previous behavior ("laya", try the
-    server then fall back to rules), so an old config is not silently changed.
-    """
+def _require_laya_engine_config() -> None:
+    """laya.cpp is the only supported decision engine."""
     value = CFG.get("decision_engine", "laya")
-    if isinstance(value, str):
-        value = value.strip().lower()
-    return value != "rule-based"
+    if isinstance(value, str) and value.strip().lower() == "rule-based":
+        raise RuntimeError(
+            "decision_engine=rule-based is no longer supported; "
+            "Laya requires laya.cpp."
+        )
+
+
+def _required_laya_paths() -> tuple[Path, Path]:
+    """Return the required binary and checkpoint, raising a clear error if absent."""
+    exe = Path(str(CFG.get("laya_server_exe")
+                   or CFG.get("laya_binary")
+                   or BASE_DIR / "laya" / "laya-r0004-windows-amd64-vulkan.exe"))
+    checkpoint = Path(str(CFG.get("laya_checkpoint")
+                         or BASE_DIR / "laya" / "typed-decisions"))
+    if not exe.is_file():
+        raise RuntimeError(
+            f"laya.cpp is required but the server executable was not found: {exe}"
+        )
+    if not checkpoint.exists():
+        raise RuntimeError(
+            f"laya.cpp is required but the typed-decisions checkpoint was not found: {checkpoint}"
+        )
+    return exe, checkpoint
 
 
 def _laya_server_log_path() -> Path:
@@ -205,9 +219,9 @@ def _laya_server_cmd() -> list:
     Falls back to the Task 1 proven defaults when the config keys are absent,
     so a config without the new keys still starts the same server.
     """
-    exe = str(CFG.get("laya_server_exe") or "").strip()
-    if not exe:
-        exe = str(BASE_DIR / "laya" / "laya-r0004-windows-amd64-vulkan.exe")
+    exe = str(CFG.get("laya_server_exe")
+              or CFG.get("laya_binary")
+              or BASE_DIR / "laya" / "laya-r0004-windows-amd64-vulkan.exe")
     args = CFG.get("laya_server_args") or []
     if not args:
         url = str(CFG.get("laya_server_url", LAYA_SERVER_URL_DEFAULT))
@@ -215,7 +229,8 @@ def _laya_server_cmd() -> list:
         args = [
             "--vulkan", "--server",
             "--host", "127.0.0.1", "--port", port,
-            "--model", str(BASE_DIR / "laya" / "typed-decisions"),
+            "--model", str(CFG.get("laya_checkpoint")
+                           or BASE_DIR / "laya" / "typed-decisions"),
         ]
     return [exe] + [str(a) for a in args]
 
@@ -234,14 +249,14 @@ def _laya_server_health(url: str, timeout: float = 2.0):
 
 
 def _start_laya_server() -> bool:
-    """Spawn the resident laya.cpp server and wait for /health (Task 3.1).
+    """Spawn the required resident laya.cpp server and wait for /health.
 
-    Best-effort: the bridge must NEVER fail to boot because of laya.cpp, so a
-    missing exe, a failed spawn or a health timeout only logs one warn line and
-    returns False (Task 2 leaves the rules fallback in place; no config edit
-    here - the Task 4 gate decides whether the engine is used).
+    laya.cpp is a hard dependency. A missing executable/checkpoint or a server
+    that cannot become healthy raises, so the bridge cannot silently run without
+    its decision engine.
 
-    Returns True only when the server is ours and /health answered.
+    Returns True when the server is ours (or an existing healthy instance) and
+    /health answered. Raises RuntimeError otherwise.
     """
     global _LAYA_SERVER
     try:
@@ -253,6 +268,8 @@ def _start_laya_server() -> bool:
 
 def _start_laya_server_locked() -> bool:
     global _LAYA_SERVER
+    _require_laya_engine_config()
+    _required_laya_paths()
     if _LAYA_SERVER is not None and _LAYA_SERVER.poll() is None:
         return True  # already ours and alive
 
@@ -265,12 +282,11 @@ def _start_laya_server_locked() -> bool:
     if existing is not None:
         log(f"laya.cpp server already listening on {url} "
             f"(backend={existing.get('backend')}); not spawning another")
-        return False
+        return True
 
     cmd = _laya_server_cmd()
     if not os.path.exists(cmd[0]):
-        log(f"laya.cpp server not started: exe not found ({cmd[0]})")
-        return False
+        raise RuntimeError(f"laya.cpp is required but the server was not found: {cmd[0]}")
 
     stdout = stderr = subprocess.DEVNULL
     try:
@@ -291,8 +307,9 @@ def _start_laya_server_locked() -> bool:
     try:
         proc = subprocess.Popen(cmd, **kwargs)
     except Exception as e:
-        log(f"laya.cpp server not started (spawn failed: {_brief_error(e)})")
-        return False
+        raise RuntimeError(
+            f"laya.cpp is required but the server could not start: {_brief_error(e)}"
+        ) from e
 
     _LAYA_SERVER = proc
     log(f"laya.cpp server starting (pid {proc.pid}, {url})")
@@ -300,10 +317,11 @@ def _start_laya_server_locked() -> bool:
     deadline = time.time() + LAYA_START_BUDGET_S
     while time.time() < deadline:
         if proc.poll() is not None:
-            log(f"laya.cpp server exited during start (code {proc.returncode}) - "
-                "using rule fallback")
             _LAYA_SERVER = None
-            return False
+            raise RuntimeError(
+                f"laya.cpp is required but the server exited during startup "
+                f"(code {proc.returncode})"
+            )
         health = _laya_server_health(url, timeout=2.0)
         if health is not None:
             backend = health.get("backend")
@@ -313,9 +331,15 @@ def _start_laya_server_locked() -> bool:
             return True
         time.sleep(LAYA_START_POLL_S)
 
-    log(f"laya.cpp server not ready after {LAYA_START_BUDGET_S:g}s - "
-        "using rule fallback")
-    return False
+    _LAYA_SERVER = None
+    try:
+        _kill_capture_tree(proc.pid)
+    except Exception:
+        pass
+    raise RuntimeError(
+        f"laya.cpp is required but the server was not ready after "
+        f"{LAYA_START_BUDGET_S:g}s"
+    )
 
 
 def _stop_laya_server():
@@ -1954,56 +1978,28 @@ async def capture_and_describe(user_text_turn: bool = False, focus: str = "") ->
     return desc
 
 # ---------------------------------------------------------------------------
-# Decision handler (laya.cpp Vulkan primary, rule-based fallback)
+# Decision handler (laya.cpp Vulkan, required)
 # ---------------------------------------------------------------------------
 
 class DecisionHandler:
-    """Task 2: readiness = the resident laya.cpp server answers GET /health.
-
-    The engine talks HTTP to that server (see LayaEngine). No file-existence
-    checks: the presence of a binary or checkpoint on disk says nothing about
-    whether anything is listening on laya_server_url, and /health must tell the
-    truth.
-    """
+    """Readiness = the required resident laya.cpp server answers GET /health."""
 
     def __init__(self):
         self.engine = None
         self.engine_name = None
         self.ready = False
-        # Task 4: the config off-switch is final for the session. When
-        # decision_engine == "rule-based" we never build an HTTP client, never
-        # spawn (Task 3 gate), never probe: engine_name stays truthful.
-        self.laya_enabled = _decision_engine_is_laya()
-        if not self.laya_enabled:
-            self.engine = RuleBasedDecision()
-            self.engine_name = "rule-based"
-            self.ready = True
-        # Single-flight: without this, two concurrent first calls (e.g. the
-        # startup spawn is still warming while /health arrives) both see
-        # ready=False and the loser can pin engine_name to "rule-based"
-        # permanently even though the server came up.
         self._lock = threading.Lock()
 
     def ensure(self):
         if self.ready:
             return
-        if not self.laya_enabled:
-            # Config says rule-based: do not touch the server at all.
-            with self._lock:
-                if not self.engine_name:
-                    self.engine = RuleBasedDecision()
-                    self.engine_name = "rule-based"
-                self.ready = True
-            return
         with self._lock:
-            if self.ready:  # another thread resolved it while we waited
+            if self.ready:
                 return
             self._resolve()
 
     def _resolve(self):
-        # Task 3: if the bridge's own startup spawn is still warming, wait for
-        # it (bounded by LAYA_START_BUDGET_S + slack) instead of racing it and
-        # latching "rule-based" for the session.
+        _require_laya_engine_config()
         if not _LAYA_START_DONE.is_set():
             _LAYA_START_DONE.wait(timeout=LAYA_START_BUDGET_S + 3.0)
         engine = LayaEngine(CFG.get("laya_server_url", LAYA_SERVER_URL_DEFAULT))
@@ -2012,20 +2008,23 @@ class DecisionHandler:
         except Exception as e:
             health = None
             log(f"laya.cpp health check failed ({_brief_error(e)})")
-        if health is not None:
-            self.engine = engine
-            self.engine_name = "laya.cpp"
-            self.ready = True
-            log(f"laya.cpp server ready ({engine.url}, "
-                f"model={health.get('model')}, backend={health.get('backend')})")
-            return
-        self.engine = RuleBasedDecision()
-        self.engine_name = "rule-based"
+        if health is None:
+            self.engine = None
+            self.engine_name = "laya.cpp unavailable"
+            self.ready = False
+            raise RuntimeError(
+                "laya.cpp is required but its server is not healthy"
+            )
+        self.engine = engine
+        self.engine_name = "laya.cpp"
         self.ready = True
-        log("Using rule-based decision fallback")
+        log(f"laya.cpp server ready ({engine.url}, "
+            f"model={health.get('model')}, backend={health.get('backend')})")
 
     def decide(self, state_json: str, options: list[str]) -> str:
         self.ensure()
+        if self.engine is None:
+            raise RuntimeError("laya.cpp is required but no engine is available")
         return self.engine.decide(state_json, options)
 
 
@@ -2088,11 +2087,11 @@ class LayaEngine:
         """Log an outage at most once per LAYA_DOWN_RELOG_S seconds."""
         now = time.time()
         if now >= self._down_until:
-            log(f"laya.cpp unavailable ({reason}) - using rule fallback")
+            log(f"laya.cpp unavailable ({reason}) - laya.cpp is required")
             self._down_until = now + LAYA_DOWN_RELOG_S
 
     async def _decide_async(self, state_json: str, options: list[str]) -> str:
-        state = json.loads(state_json)          # malformed state -> rule fallback
+        state = json.loads(state_json)          # malformed state -> RuntimeError
         body = {
             "state": state,
             "questions": {
@@ -2106,7 +2105,7 @@ class LayaEngine:
         client = self._get_client()
         resp = await client.post(f"{self.url}/predict", json=body)
         if resp.status_code >= 400:
-            # 422 = token budget, 5xx = server-side; both -> rule fallback.
+            # 422 = token budget, 5xx = server-side; both are fatal.
             raise RuntimeError(f"HTTP {resp.status_code}: {resp.text[:200]}")
         data = resp.json()
         results = data.get("results") or []
@@ -2142,16 +2141,12 @@ class LayaEngine:
             return choice
         except Exception as e:
             log(f"laya.cpp decide {(time.time() - t0) * 1000:.0f}ms -> "
-                f"fallback (rule-based)")
+                f"failed ({_brief_error(e)})")
             self._note_down(_brief_error(e))
-        return RuleBasedDecision().decide(state_json, options)
+            raise RuntimeError(
+                "laya.cpp is required but the decision server failed"
+            ) from e
 
-
-class RuleBasedDecision:
-    def decide(self, state_json: str, options: list[str]) -> str:
-        if "attack" in options and any(e in state_json for e in ("Goblin", "Skeleton", "Zombie")):
-            return "attack"
-        return "follow" if "follow" in options else (options[0] if options else "idle")
 
 DECISION = DecisionHandler()
 
@@ -2534,25 +2529,27 @@ async def health():
     # Task 2: resolve the decision engine lazily and truthfully. ensure() does a
     # bounded (2 s) GET on the laya.cpp server; run it off the event loop so a
     # dead server cannot stall /health.
-    # Task 4: with decision_engine == "rule-based" no probe happens at all.
     #
     # Fix (Important review): /health must NEVER block on ensure() while the
-    # Task 3 startup spawn is still warming. _resolve() waits on
-    # _LAYA_START_DONE for LAYA_START_BUDGET_S + 3.0 (~23 s) and the 2 s probe
-    # on top, so an /health issued during warm-up used to stall for ~23 s -
-    # turning the status probe (and START-LAYA.bat's 2 s-timeout poll loop) into
-    # a boot-synchronized call. Report the truthful current value instead:
-    # engine_name is already the resolved value ("rule-based" when the config
-    # off-switch pinned it, "laya.cpp"/"rule-based" once ensure() ran, else
-    # None while the server is still starting). Resolving stays the first
-    # /chat's job, exactly as before; once warm, /health reports the real name.
+    # Task 3 startup spawn is still warming. Report the truthful current value;
+    # once warm, /health reports the real engine name. If laya.cpp disappears,
+    # health reports ok=false instead of silently pretending the rule fallback
+    # is acceptable.
     if DECISION.ready:
         engine_name = DECISION.engine_name
     elif _LAYA_START_DONE.is_set():
-        # Warm-up finished (or was never needed) -> resolving is now cheap
-        # (one bounded GET, no wait), so the first /health can still report the
-        # settled value without the long block.
-        await asyncio.get_event_loop().run_in_executor(None, DECISION.ensure)
+        try:
+            await asyncio.get_event_loop().run_in_executor(None, DECISION.ensure)
+        except Exception as e:
+            return {
+                "ok": False,
+                "error": _brief_error(e),
+                "llm_ready": LLM.ready,
+                "llm_providers": [p["name"] for p in LLM.providers],
+                "decision_engine": DECISION.engine_name or "laya.cpp unavailable",
+                "tts_ready": TTS.ready,
+                "tts_enabled": bool(CFG.get("tts_enabled", True)),
+            }
         engine_name = DECISION.engine_name
     else:
         # Still warming: do not block. Report the truthful transient value.
@@ -2580,8 +2577,15 @@ async def chat(request: Request):
         return ChatResponse(say="(Laya's bridge got malformed JSON)", action="follow")
     req = ChatRequest(**payload)
     # Task 8: this route is the plugin's typed-chat path -> a real user turn.
-    return await run_chat(req.player, req.message, req.state, req.with_audio,
-                          user_text_turn=True)
+    try:
+        return await run_chat(req.player, req.message, req.state, req.with_audio,
+                              user_text_turn=True)
+    except RuntimeError as e:
+        log(f"Chat refused: {e}")
+        return ChatResponse(
+            say="(laya.cpp is required but its decision server is unavailable.)",
+            action="follow",
+        )
 
 
 _CONTROL_KEYS = ("say", "emotion", "action", "task", "target_hint", "count",
@@ -3487,21 +3491,20 @@ load();
 
 @app.on_event("startup")
 async def warmup():
-    """Load Kokoro TTS in the background so the FIRST reply isn't slow,
-    and start the in-process voice helper (mic + STT + playback)."""
+    """Start the required laya.cpp server before serving chat, then warm TTS.
+
+    laya.cpp is not optional: if the binary, checkpoint, selected engine, or
+    server health is missing, startup raises and the bridge does not pretend to
+    work with a fallback.
+    """
     import asyncio
     log("Appearance editor: http://127.0.0.1:8788/appearance")
 
-    # Task 3: own the laya.cpp server. Best-effort and non-blocking; a failure
-    # only warns once (inside _start_laya_server) and boot continues.
-    # Task 4: honor decision_engine - when it is "rule-based", never spawn the
-    # server at all (otherwise "rule-based" would still pay GPU/model cost).
-    # The start event is still set so any waiter unblocks immediately.
-    if _decision_engine_is_laya():
-        asyncio.get_event_loop().run_in_executor(None, _start_laya_server)
-    else:
-        log("decision_engine=rule-based: laya.cpp server not started")
-        _LAYA_START_DONE.set()
+    try:
+        await asyncio.get_event_loop().run_in_executor(None, _start_laya_server)
+    except Exception as e:
+        log(f"FATAL: laya.cpp is required but startup failed: {_brief_error(e)}")
+        raise
 
     def _warm():
         # Task 8.3: load the model and pay the first-synthesis cost once at
@@ -3510,7 +3513,6 @@ async def warmup():
         # concurrently; it waits on TTS._warm_event instead. Still non-blocking:
         # this runs in an executor and uvicorn binds/answers first.
         # Failures are logged once and ignored (the turn path handles them too).
-        # laya.cpp /health is already handled by Task 3's startup probe above.
         TTS.warm()
 
     asyncio.get_event_loop().run_in_executor(None, _warm)

@@ -11,6 +11,15 @@ if (-not (Test-Path $configPath)) {
     Write-Host "Created config\bridge-config.json. Add an API key in the settings page."
 }
 
+$layaDir = Join-Path $Root "ai-bridge\laya"
+$layaExe = Get-ChildItem $layaDir -Filter "*windows-amd64-vulkan.exe" -ErrorAction SilentlyContinue |
+    Sort-Object LastWriteTime -Descending |
+    Select-Object -First 1
+$layaCheckpoint = Join-Path $layaDir "typed-decisions"
+if (-not $layaExe -or -not (Test-Path $layaCheckpoint)) {
+    throw "laya.cpp is required. Put the Vulkan executable and typed-decisions checkpoint in '$layaDir'."
+}
+
 # Keep the plugin and the bridge pointed at the same local files.
 $envPairs = @{
     "LAYA_BLOCKS_JSON" = (Join-Path $Root "config\blocks.json")

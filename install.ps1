@@ -47,6 +47,28 @@ $configDir = Join-Path $Root "config"
 $logsDir = Join-Path $Root "logs"
 New-Item -ItemType Directory -Force -Path $modsDir, $configDir, $logsDir | Out-Null
 
+Write-Step "Checking the required laya.cpp engine"
+$layaDir = Join-Path $Root "ai-bridge\laya"
+$layaExe = Get-ChildItem $layaDir -Filter "*windows-amd64-vulkan.exe" -ErrorAction SilentlyContinue |
+    Sort-Object LastWriteTime -Descending |
+    Select-Object -First 1
+$layaCheckpoint = Join-Path $layaDir "typed-decisions"
+if (-not $layaExe -or -not (Test-Path $layaCheckpoint)) {
+    throw @"
+laya.cpp is REQUIRED and was not found.
+
+Expected:
+  $layaDir\*windows-amd64-vulkan.exe
+  $layaCheckpoint
+
+Download a Windows Vulkan build and the typed-decisions checkpoint from:
+  https://github.com/lkarlslund/laya.cpp/releases
+
+Place the executable and checkpoint in '$layaDir', then run install.ps1 again.
+"@
+}
+Write-Host "  Found $($layaExe.Name) and typed-decisions checkpoint"
+
 Write-Step "Installing the Hytale plugin"
 $pluginJar = Get-ChildItem (Join-Path $Root "dist") -Filter "LayaPlugin-*.jar" -ErrorAction SilentlyContinue |
     Sort-Object LastWriteTime -Descending |
@@ -107,4 +129,4 @@ Write-Host "  1. Run .\start.bat and open http://127.0.0.1:8788"
 Write-Host "  2. Paste an API key in Settings and save"
 Write-Host "  3. Start Hytale and talk to Laya in chat or use /laya"
 Write-Host ""
-Write-Host "The optional laya.cpp engine is documented in INSTALL.md."
+Write-Host "laya.cpp is required and was validated before installation."

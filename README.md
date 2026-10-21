@@ -11,7 +11,7 @@
 
 <p align="center">
   <code>Hytale 0.7.x</code> &nbsp;|&nbsp; <code>Windows</code> &nbsp;|&nbsp;
-  <code>Python 3.11</code> &nbsp;|&nbsp; <code>Optional laya.cpp</code>
+  <code>Python 3.11</code> &nbsp;|&nbsp; <code>laya.cpp required</code>
 </p>
 
 ## Why is she called Laya?
@@ -21,10 +21,10 @@ open-source local inference engine that runs her decision model. The first
 version of this companion was built around the idea of putting a real local
 model inside Hytale and letting it run on the player's own GPU through Vulkan.
 
-The engine is optional today: Laya still works with a rule-based decision
-fallback if you do not install `laya.cpp`. The name stayed because it is the
-project's origin story: **a local brain for a world that usually only has
-scripted NPCs.**
+The engine is not an optional add-on. Laya uses the resident `laya.cpp` Vulkan
+server for every decision, and the bridge refuses to start without the engine
+and its `typed-decisions` checkpoint. The name is the architecture: **a local
+brain for a world that usually only has scripted NPCs.**
 
 ## Why does she respond so fast?
 
@@ -70,6 +70,7 @@ message. Exact numbers depend on the provider, GPU, and whether vision is used.
 - Windows 10/11
 - Hytale 0.7.x
 - Python 3.11
+- A Windows Vulkan build of `laya.cpp` plus the `typed-decisions` checkpoint
 - Java 25 only if you build the plugin yourself
 - An API key from Groq, Google AI Studio, or z.ai for cloud replies
 - About 1 GB free for the local speech models
@@ -83,7 +84,14 @@ message. Exact numbers depend on the provider, GPU, and whether vision is used.
    cd LayaHytaleCompanion
    ```
 
-2. Double-click `install.bat`, or run:
+2. Install the required `laya.cpp` engine:
+
+   1. Download a Windows Vulkan build and the `typed-decisions` checkpoint from
+      <https://github.com/lkarlslund/laya.cpp/releases>.
+   2. Put the `.exe` and `typed-decisions/` folder under `ai-bridge\laya\`.
+   3. The installer and bridge both refuse to continue without them.
+
+3. Double-click `install.bat`, or run:
 
    ```powershell
    powershell -ExecutionPolicy Bypass -File .\install.ps1
@@ -94,13 +102,13 @@ message. Exact numbers depend on the provider, GPU, and whether vision is used.
    the Python dependencies, and downloads the speech models unless you pass
    `-SkipModels`.
 
-3. Run `start.bat`, open <http://127.0.0.1:8788>, and paste your API key into
+4. Run `start.bat`, open <http://127.0.0.1:8788>, and paste your API key into
    the settings page. Save the settings.
-4. Start Hytale. The installer sets the plugin's config paths as user
+5. Start Hytale. The installer sets the plugin's config paths as user
    environment variables, so restart Hytale once after the first install.
-5. In game, talk to Laya in chat or use `/laya`.
+6. In game, talk to Laya in chat or use `/laya`.
 
-See [INSTALL.md](INSTALL.md) for manual setup, the optional `laya.cpp` engine,
+See [INSTALL.md](INSTALL.md) for manual setup, the required `laya.cpp` engine,
 troubleshooting, and `reset-data.ps1` for a clean inventory, memory, and
 appearance.
 

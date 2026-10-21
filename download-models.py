@@ -8,8 +8,8 @@ Downloads the local speech models used by the AI bridge:
 Run from the repository root:
     python download-models.py
 
-The optional laya.cpp decision engine is a separate manual download. See
-INSTALL.md.
+The laya.cpp decision engine is required and must be installed separately.
+See INSTALL.md.
 """
 
 import sys
@@ -83,17 +83,23 @@ def main() -> int:
 
     results = [download_kokoro(), download_parakeet()]
 
-    print("\nOptional decision engine")
+    print("\nRequired decision engine")
     print("  laya.cpp is not downloaded automatically.")
     print("  Get a Windows Vulkan build and the typed-decisions checkpoint from:")
     print("    https://github.com/lkarlslund/laya.cpp/releases")
     print(f"  Put them in: {LAYA_DIR}")
+    laya_exe = list(LAYA_DIR.glob("*windows-amd64-vulkan.exe"))
+    laya_checkpoint = LAYA_DIR / "typed-decisions"
+    laya_ok = bool(laya_exe) and laya_checkpoint.exists()
+    if not laya_ok:
+        print("  [MISSING] laya.cpp is REQUIRED; the bridge will not start without it.")
 
     print("\nSummary")
     print(f"  Kokoro:   {'OK' if results[0] else 'MISSING'}")
     print(f"  Parakeet: {'OK' if results[1] else 'MISSING'}")
+    print(f"  laya.cpp: {'OK' if laya_ok else 'MISSING (required)'}")
     print("\nNext: start the bridge with start.bat and add an API key in Settings.")
-    return 0 if all(results) else 1
+    return 0 if all(results) and laya_ok else 1
 
 
 if __name__ == "__main__":
