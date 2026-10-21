@@ -74,7 +74,8 @@ $envPairs = @{
     "LAYA_LOG"          = (Join-Path $logsDir "laya-plugin.log")
 }
 foreach ($pair in $envPairs.GetEnumerator()) {
-    [Environment]::SetEnvironmentVariable($pair.Key, $pair.Value, "User")
+    # setx writes the user-level variable without the slow .NET registry path.
+    & setx $pair.Key $pair.Value | Out-Null
     Set-Item -Path "Env:$($pair.Key)" -Value $pair.Value
 }
 Write-Host "  Set Laya config paths for the current Windows user"

@@ -1,5 +1,5 @@
 """
-Laya AI Bridge â€” FastAPI service running on 127.0.0.1:8788
+Laya AI Bridge - FastAPI service running on 127.0.0.1:8788
 Hybrid cloud approach, modeled on poker-coach's working pattern:
   - STT: Parakeet-tdt-0.6b-v2 (local CPU)
   - LLM: Groq (primary) + Google AI Studio (backup) via their respective APIs
@@ -52,7 +52,7 @@ app = FastAPI(title="Laya AI Bridge", version="0.4.0-hybrid")
 
 @app.middleware("http")
 async def no_cache(request, call_next):
-    """Always serve fresh content â€” browsers were caching the old
+    """Always serve fresh content - browsers were caching the old
     settings page and old /api/config values after fixes."""
     response = await call_next(request)
     response.headers["Cache-Control"] = "no-store"
@@ -368,7 +368,7 @@ try:
     KNOWLEDGE = json.loads(KNOWLEDGE_PATH.read_text(encoding="utf-8"))["entries"]
     log(f"Knowledge base loaded: {len(KNOWLEDGE)} entries")
 except Exception as e:
-    log(f"Knowledge base not loaded ({e}) â€” run build_knowledge.py")
+    log(f"Knowledge base not loaded ({e}) - run build_knowledge.py")
 
 
 def load_memory():
@@ -475,7 +475,7 @@ def inventory_block() -> str:
 
 
 # ---------------------------------------------------------------------------
-# Validation error handler â€” logs exactly what was received
+# Validation error handler - logs exactly what was received
 # ---------------------------------------------------------------------------
 
 @app.exception_handler(RequestValidationError)
@@ -492,7 +492,7 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
         content={"detail": exc.errors()},
     )
 
-# REMOVED middleware â€” instead log body inside the endpoint to avoid body-stream issues
+# REMOVED middleware - instead log body inside the endpoint to avoid body-stream issues
 
 # ---------------------------------------------------------------------------
 # Cloud LLM handlers (Groq primary, Google backup)
@@ -759,11 +759,11 @@ class CloudLLMHandler:
         control-shaped can ever be spoken.
         """
         if not self.ready:
-            return "(Laya's brain is offline â€” no API keys configured.)"
+            return "(Laya's brain is offline - no API keys configured.)"
 
         now = time.time() * 1000
         avail = [p["name"] for p in self.providers if now >= self.cooldowns.get(p["name"], 0)]
-        log(f"LLM generating â€” providers available={avail}")
+        log(f"LLM generating - providers available={avail}")
         for provider in self.providers:
             name = provider["name"]
             if now < self.cooldowns.get(name, 0):
@@ -795,7 +795,7 @@ class CloudLLMHandler:
                 log(f"  {name} exception: {e}")
                 self.cooldowns[name] = max(self.cooldowns.get(name, 0), now + 10000)
 
-        return "(Laya's thoughts are scattered â€” all LLM providers failed.)"
+        return "(Laya's thoughts are scattered - all LLM providers failed.)"
 
     async def _call_zai(self, provider: dict, prompt: str, system_extra: str = "") -> Optional[str]:
         """z.ai (Zhipu GLM) OpenAI-compatible chat, tried FIRST when configured.
@@ -1322,7 +1322,7 @@ def _cache_vision(png_path: str, desc: str):
     """Append (path, description) to logs/laya-vision.log, keep the last 20.
 
     Rotation: read the JSON-lines file, keep the trailing VISION_KEEP lines, and
-    rewrite via an atomic replace. Image BYTES are never written â€” only the temp
+    rewrite via an atomic replace. Image BYTES are never written - only the temp
     PNG path. Temp PNGs that fall out of the window are deleted.
     """
     try:
@@ -1840,7 +1840,7 @@ async def capture_and_describe(user_text_turn: bool = False, focus: str = "") ->
     Only user-originated turns *that ask her to look* capture: `user_text_turn`
     must be True (the caller in run_chat passes it for typed chat + voice) and
     the message must contain a cue from VISION_TRIGGERS. This function never
-    raises â€” every failure logs `vision skipped: <reason>` and returns None.
+    raises - every failure logs `vision skipped: <reason>` and returns None.
     """
     if not user_text_turn:
         return None
@@ -2160,7 +2160,7 @@ EMOTION_SPEED = {
 }
 
 class TTSHandler:
-    """Kokoro TTS â€” ONNX (preferred, ~0.3 GB, no torch) with torch fallback."""
+    """Kokoro TTS - ONNX (preferred, ~0.3 GB, no torch) with torch fallback."""
 
     def __init__(self):
         self.ready = False
@@ -2188,7 +2188,7 @@ class TTSHandler:
     def _ensure_locked(self):
         if self.ready:
             return
-        # Preferred: ONNX Runtime â€” ~0.3 GB vs ~2 GB for torch, no PyTorch needed
+        # Preferred: ONNX Runtime - ~0.3 GB vs ~2 GB for torch, no PyTorch needed
         try:
             from kokoro_onnx import Kokoro
             choice = str(CFG.get("tts_model", "fp16")).lower()
@@ -2211,7 +2211,7 @@ class TTSHandler:
                 log(f"Kokoro TTS loaded (ONNX {choice}, {os.path.getsize(onnx_model)//(1024*1024)} MB)")
                 return
         except Exception as e:
-            log(f"Kokoro ONNX load failed ({e}) â€” trying torch fallback")
+            log(f"Kokoro ONNX load failed ({e}) - trying torch fallback")
         try:
             from kokoro import KPipeline
             self.torch_pipeline = KPipeline(lang_code='a')
@@ -2434,7 +2434,7 @@ class ChatRequest(BaseModel):
     player: str
     message: str
     state: dict
-    with_audio: bool = False  # Hytale plugin only uses say/action â€” skip TTS for speed
+    with_audio: bool = False  # Hytale plugin only uses say/action - skip TTS for speed
 
 
 class ChatResponse(BaseModel):
@@ -2502,11 +2502,11 @@ async def chat(request: Request):
     raw_body = await request.body()
     log(f"POST /chat received, raw_body={raw_body[:400]}")
     if not raw_body:
-        return ChatResponse(say="(Laya's bridge crashed â€” empty request body)", action="follow")
+        return ChatResponse(say="(Laya's bridge crashed - empty request body)", action="follow")
     try:
         payload = json.loads(raw_body.decode("utf-8"))
     except Exception as e:
-        log(f"JSON parse failed: {e} â€” body={raw_body[:400]!r}")
+        log(f"JSON parse failed: {e} - body={raw_body[:400]!r}")
         return ChatResponse(say="(Laya's bridge got malformed JSON)", action="follow")
     req = ChatRequest(**payload)
     # Task 8: this route is the plugin's typed-chat path -> a real user turn.
@@ -2565,7 +2565,7 @@ def clean_speech(raw: str) -> tuple[str, str, str]:
 
 async def run_chat(player: str, message: str, state: dict, with_audio: bool,
                    user_text_turn: bool = False) -> ChatResponse:
-    """Core chat pipeline â€” used by both the HTTP endpoint and the in-process voice helper."""
+    """Core chat pipeline - used by both the HTTP endpoint and the in-process voice helper."""
     start = time.time()
     state_json = json.dumps(state, separators=(",", ":"))
     # Combat Task 1: a pure deterministic command ("stop", "follow me", "stay
@@ -2813,7 +2813,7 @@ async def run_chat(player: str, message: str, state: dict, with_audio: bool,
             log(f"TTS error: {e}")
     else:
         # Typed-chat path: reply fast, synthesize voice in the background and
-        # write it to logs/laya-say.wav â€” the in-process poller plays new files.
+        # write it to logs/laya-say.wav - the in-process poller plays new files.
         # Task 7: this path is NEVER streamed; behavior is byte-identical.
         import asyncio as _asyncio
         _asyncio.get_event_loop().create_task(_background_tts(say_line, emotion))
@@ -2950,7 +2950,7 @@ async def tts(text: str):
 
 
 # ---------------------------------------------------------------------------
-# Settings web UI â€” http://127.0.0.1:8788/settings
+# Settings web UI - http://127.0.0.1:8788/settings
 # ---------------------------------------------------------------------------
 
 @app.get("/api/config")
@@ -2989,7 +2989,7 @@ async def audio_devices():
 async def save_config(request: Request):
     """Merge posted fields into bridge-config.json and hot-reload.
     Guards against the settings page sending back masked keys ('...') and
-    stringified arrays â€” those would corrupt the config."""
+    stringified arrays - those would corrupt the config."""
     body = json.loads((await request.body()).decode("utf-8") or "{}")
     cfg_path = BASE_DIR.parent / "config" / "bridge-config.json"
     try:

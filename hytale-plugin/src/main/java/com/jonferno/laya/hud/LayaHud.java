@@ -21,7 +21,7 @@ import com.hypixel.hytale.server.core.universe.PlayerRef;
  * re-apply". A live value refresh is therefore {@code update(false, b)} with a
  * builder that carries only {@code set(...)} commands and NO {@code append}.
  *
- * <p>Element ids are declared in {@code LayaHud.ui}: {@code #Panel},
+ * <p>Element ids are declared in {@code LayaCompanionHud.ui}: {@code #Panel},
  * {@code #Portrait}, {@code #Name}, {@code #State}, {@code #BarTrack},
  * {@code #BarGreen}, {@code #BarAmber}, {@code #BarRed}, {@code #Hp}.
  */
