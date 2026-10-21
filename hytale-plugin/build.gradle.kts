@@ -48,7 +48,7 @@ val hytaleModsDir: String =
 if (hytaleModsDir.isNotBlank()) {
     tasks.register<Copy>("copyToMods") {
         dependsOn(tasks.named("jar"))
-        from(tasks.named<Jar>("jar").flatMap { it.archiveFile })
+        from(tasks.named<Jar>("jar").get().archiveFile)
         into(hytaleModsDir)
         duplicatesStrategy = DuplicatesStrategy.EXCLUDE
     }

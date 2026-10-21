@@ -65,7 +65,7 @@ def download_parakeet() -> bool:
         snapshot_download(
             repo_id=PARAKEET_REPO,
             local_dir=str(out_dir),
-            allow_patterns=["*.onnx", "*.json", "vocab.txt", "README.md"],
+            allow_patterns=["*int8*", "nemo128.onnx", "config.json", "vocab.txt"],
         )
         print("  [ok  ] Parakeet ONNX files")
         return True

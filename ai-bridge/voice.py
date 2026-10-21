@@ -119,10 +119,10 @@ def _tp_loop(cfg):
 
 def _talk_loop(cfg, run_chat_fn, loop):
     if not HAS_KEYBOARD:
-        log("keyboard module missing — voice disabled")
+        log("keyboard module missing - voice disabled")
         return
     talk_key = cfg.get("talk_key", "x")
-    player = cfg.get("player_name", "Jonferno")
+    player = cfg.get("player_name", "player")
     stt = STT()
     # warm STT in background so the first press is fast
     threading.Thread(target=stt.warm, daemon=True).start()
