@@ -1490,8 +1490,7 @@ ALL_COUNT_CUES = ("everything", "as much", "as many", "around us", "around here"
 STOP_TASK_CUES = ("stop mining", "stop gathering", "stop digging", "stop it",
                   "never mind", "nevermind", "nvm",
                   "stop chopping", "stop cutting", "stop breaking", "quit chopping",
-                  "stop doing that", "why are you", "every time", "i didn't ask",
-                  "didn't ask you",
+                  "stop doing that",
                   "that's enough", "thats enough", "enough", "leave it",
                   "cancel that", "cancel the task", "no more", "don't mine",
                   "dont mine", "stop the task", "halt")
