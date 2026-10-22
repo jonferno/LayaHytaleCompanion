@@ -96,11 +96,13 @@ need those models.
 - Java 25 only if you build the plugin yourself
 - **Free Groq API key** - [create one here](https://console.groq.com/keys)
 - **Free z.ai API key** - [create one here](https://z.ai/manage-apikey/apikey)
+- **NanoGPT API key** - [create one here](https://nano-gpt.com/api) (paid; uncensored primary model)
 - **Deepgram API key** - [$200 starter credits here](https://console.deepgram.com/api-keys)
 - Optional: about 1 GB for Kokoro TTS and Parakeet local speech recognition
 
-All three are **100% free to start**; Deepgram includes $200 of starter credits,
-which should last a long time at normal companion use.
+Groq and z.ai are free to start; Deepgram includes $200 of starter credits,
+which should last a long time at normal companion use. NanoGPT is optional and
+billed per token by NanoGPT.
 
 ### Quick start
 
@@ -152,7 +154,7 @@ Hytale client
     v
 Python AI bridge (ai-bridge/)
     - memory and prompt construction
-    - Groq / Google / z.ai LLM clients
+    - NanoGPT (uncensored primary) / Groq / Google / z.ai LLM clients
     - Deepgram Aura TTS (default); Edge + Kokoro backups
     - Parakeet ONNX STT for microphone input
     - resident laya.cpp decision server :8090

@@ -2,8 +2,8 @@
 Laya AI Bridge - FastAPI service running on 127.0.0.1:8788
 Hybrid cloud approach, modeled on poker-coach's working pattern:
   - STT: Parakeet-tdt-0.6b-v2 (local CPU)
-  - LLM: Groq (primary) + Google AI Studio (backup) via their respective APIs
-  - TTS: Kokoro-82M (local GPU/CPU)
+  - LLM: NanoGPT (uncensored primary), Groq, z.ai, Google fallbacks
+  - TTS: Deepgram Aura (default); Edge and Kokoro backups
   - Decisions: laya.cpp typed-decisions (Vulkan), required
 """
 
@@ -77,6 +77,9 @@ def log(msg: str):
 
 def load_config():
     default = {
+        "nano_api_key": os.getenv("NANO_API_KEY", ""),
+        "nano_base_url": "https://api.nano-gpt.com/api/v1",
+        "nano_models": ["gemma-4-26b-a4b-it-chimeraxheretic"],
         "groq_api_key": os.getenv("GROQ_API_KEY", ""),
         "google_api_key": os.getenv("GOOGLE_API_KEY", ""),
         "zai_api_key": os.getenv("ZAI_API_KEY", ""),
@@ -558,6 +561,22 @@ def gear_block(state: dict, include_appearance: bool = False) -> str:
             "actual current state): " + "; ".join(pieces) + ".")
 
 
+def _looks_like_question(message: str) -> bool:
+    """True for a question, including one typed without a question mark.
+
+    A question may discuss a stance ("should we kill or tame this hog?")
+    without ordering it. Only explicit commands should let stance_intent()
+    override the model's chosen action.
+    """
+    text = (message or "").strip().lower()
+    if "?" in text:
+        return True
+    text = re.sub(r"^(hey|ok|okay|laya)[, ]+", "", text)
+    return bool(re.match(
+        r"^(should|shall|can|could|would|will|do|does|did|are|is|was|were|"
+        r"what|which|who|where|when|why|how)\b", text))
+
+
 def apply_stance_guard(message: str, action: str, say_line: str,
                        fast: bool = False) -> tuple[str, str]:
     """Apply a deterministic stance without discarding a real conversational reply.
@@ -568,6 +587,14 @@ def apply_stance_guard(message: str, action: str, say_line: str,
     "I've got your back." just because the text contains "defend".
     """
     if fast or action == "stop_task":
+        return action, say_line
+    # A question can mention a stance word without issuing an order. This is
+    # the "should we kill or tame this hog?" case: stance_intent() saw "kill"
+    # and forced attack even though the model had chosen to tame it. Keep the
+    # model's action for questions; explicit commands still use the guard.
+    if _looks_like_question(message):
+        if stance_intent(message):
+            log(f"Guard: question mentions stance -> keeping model action={action}")
         return action, say_line
     stance = stance_intent(message)
     if not stance:
@@ -814,13 +841,24 @@ def _verify_stream_text(sentences: list[str], raw: str) -> None:
 
 
 class CloudLLMHandler:
-    """Calls Groq (primary) or Google AI Studio (backup) via their respective APIs."""
+    """Calls NanoGPT (uncensored primary), Groq, z.ai, or Google as fallbacks."""
 
     def __init__(self):
         self.http = httpx.AsyncClient(timeout=httpx.Timeout(8.0, connect=5.0))
         self.providers = []
-        # Order = latency order: Groq qwen is fastest (0.4-1.7 s turns), z.ai
-        # glm-4.5-flash second (1.9-2.8 s, free/unmetered), Google last.
+        # Order = user preference: NanoGPT's uncensored model first when
+        # configured, then latency order: Groq qwen is fastest (0.4-1.7 s
+        # turns), z.ai glm-4.5-flash second (1.9-2.8 s, free/unmetered),
+        # Google last.
+        if CFG.get("nano_api_key"):
+            self.providers.append({
+                "name": "nano",
+                "api_key": CFG["nano_api_key"],
+                "models": CFG.get("nano_models",
+                                  ["gemma-4-26b-a4b-it-chimeraxheretic"]),
+                "base_url": CFG.get("nano_base_url", "https://api.nano-gpt.com/api/v1"),
+                "chat_path": "/chat/completions",
+            })
         if CFG.get("groq_api_key"):
             self.providers.append({
                 "name": "groq",
@@ -876,7 +914,9 @@ class CloudLLMHandler:
 
             try:
                 log(f"  trying {name}...")
-                if name == "zai":
+                if name == "nano":
+                    result = await self._call_nano(provider, prompt, system_extra)
+                elif name == "zai":
                     result = await self._call_zai(provider, prompt, system_extra)
                 elif name == "groq":
                     result = await self._call_groq(provider, prompt, system_extra,
@@ -901,8 +941,62 @@ class CloudLLMHandler:
 
         return "(Laya's thoughts are scattered - all LLM providers failed.)"
 
+    async def _call_nano(self, provider: dict, prompt: str,
+                         system_extra: str = "") -> Optional[str]:
+        """NanoGPT OpenAI-compatible chat for the uncensored primary model.
+
+        Deliberately non-streaming. NanoGPT can take longer than the small
+        Groq models on a cold 26B request, so this path gets a 20 s read
+        timeout while the other providers keep their tighter budgets.
+        """
+        system = PERSONA if not system_extra else f"{PERSONA}\n\n{system_extra}"
+        messages = [
+            {"role": "system", "content": system},
+            {"role": "user", "content": prompt},
+        ]
+        for model in provider["models"]:
+            try:
+                resp = await self.http.post(
+                    f"{provider['base_url']}{provider['chat_path']}",
+                    headers={
+                        "Authorization": f"Bearer {provider['api_key']}",
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "model": model,
+                        "messages": messages,
+                        "temperature": CFG["llm_temperature"],
+                        "max_tokens": CFG["llm_max_tokens"],
+                        "stop": ["\nUser:", "\nPlayer:", "\n\n"],
+                    },
+                    timeout=httpx.Timeout(20.0, connect=5.0),
+                )
+                if resp.status_code == 200:
+                    content = (resp.json().get("choices", [{}])[0]
+                               .get("message", {}).get("content", "").strip())
+                    if content:
+                        log(f"nano {model}: answered")
+                        return content
+                    log(f"nano {model}: empty content")
+                    continue
+                body = resp.text[:300]
+                if resp.status_code in (401, 403):
+                    log(f"nano {model}: auth failed ({resp.status_code})")
+                    return None
+                if resp.status_code == 404:
+                    log(f"nano {model}: model not found (404)")
+                    continue
+                if resp.status_code == 429:
+                    self.cooldowns[provider["name"]] = (time.time() * 1000) + 60000
+                    log(f"nano {model}: rate limited - cooldown 60s")
+                    return None
+                log(f"nano {model}: error {resp.status_code}: {body}")
+            except Exception as e:
+                log(f"nano {model} exception: {e}")
+        return None
+
     async def _call_zai(self, provider: dict, prompt: str, system_extra: str = "") -> Optional[str]:
-        """z.ai (Zhipu GLM) OpenAI-compatible chat, tried FIRST when configured.
+        """z.ai (Zhipu GLM) OpenAI-compatible chat, tried after Nano/Groq.
 
         Deliberately non-streaming: this provider is the new primary but the
         streaming path is Groq-specific (flag off in live config anyway).
@@ -2938,6 +3032,10 @@ async def run_chat(player: str, message: str, state: dict, with_audio: bool,
             except ValueError:
                 pass
 
+    if task in ("none", "null", "no task"):
+        task = ""
+        target_hint = ""
+
     # Cycle 5: deterministic intent leg. A cancel cue always wins (and must
     # never be re-read as a new task); otherwise a strong verb + hint word
     # forces the task even when the model refuses from stale memory.
@@ -3003,6 +3101,18 @@ async def run_chat(player: str, message: str, state: dict, with_audio: bool,
     if action == "stay" and not wants_stay(message):
         log("Guard: unprompted action=stay -> follow")
         action = "follow"
+
+    # Never let a non-combat/non-gift conversational sentence change those states.
+    if not fast and not task:
+        if (action == "attack" and stance_intent(message) != "attack"
+                and not is_creature_attack(message)):
+            log("Guard: unprompted action=attack -> follow")
+            action = "follow"
+        if action == "gift_hand" and not re.search(
+                r"\b(gift|give|take|hand|hold|offer|have this)\b",
+                (message or "").lower()):
+            log("Guard: unprompted action=gift_hand -> follow")
+            action = "follow"
 
     # Name-aware attack: let the plugin match a named creature ("kill those pigs")
     # even when it is a protected passive and the crosshair is not on it.
@@ -3191,7 +3301,8 @@ async def tts(text: str):
 async def get_config():
     """Current config with API keys masked."""
     safe = dict(CFG)
-    for k in ("groq_api_key", "google_api_key", "zai_api_key", "deepgram_api_key"):
+    for k in ("nano_api_key", "groq_api_key", "google_api_key", "zai_api_key",
+              "deepgram_api_key"):
         if safe.get(k):
             safe[k] = safe[k][:8] + "..." + safe[k][-4:]
     return safe
@@ -3239,8 +3350,9 @@ async def save_config(request: Request):
         if k.endswith("_api_key") and isinstance(v, str) and "..." in v:
             log(f"  Ignoring masked {k} (display value, not a real key)")
             continue
-        # groq_models / zai_models arrive as comma-strings from the HTML input
-        if k in ("groq_models", "zai_models") and isinstance(v, str):
+        # groq_models / zai_models / nano_models arrive as comma-strings from
+        # the HTML input
+        if k in ("groq_models", "zai_models", "nano_models") and isinstance(v, str):
             v = [m.strip() for m in v.split(",") if m.strip()]
         cleaned[k] = v
 
@@ -3248,8 +3360,9 @@ async def save_config(request: Request):
     cfg_path.write_text(json.dumps(current, indent=4), encoding="utf-8")
     # Hot-reload
     CFG.update(cleaned)
-    if any(k in cleaned for k in ("groq_api_key", "google_api_key", "zai_api_key",
-                                  "groq_models", "zai_models", "google_model")):
+    if any(k in cleaned for k in ("nano_api_key", "groq_api_key", "google_api_key",
+                                  "zai_api_key", "nano_models", "groq_models",
+                                  "zai_models", "google_model")):
         LLM.__init__()  # rebuild provider list
         log("LLM providers rebuilt after config change")
     if "tts_model" in cleaned:
@@ -3482,6 +3595,8 @@ Speak replies (TTS)</label>
 </div>
 
 <div class="card"><h2 style="margin-top:0">LLM (cloud brain)</h2>
+<label>NanoGPT models (comma-separated, tried first)</label><input id="nano_models" placeholder="gemma-4-26b-a4b-it-chimeraxheretic">
+<div class="status">NanoGPT is used first when its key is set; the uncensored model is the default. Groq/z.ai/Google remain fallbacks.</div>
 <label>Groq models (comma-separated, tried in order)</label><input id="groq_models">
 <label>Google model</label><input id="google_model">
 <label>z.ai models (comma-separated, tried in order)</label><input id="zai_models" placeholder="glm-4.5-flash, glm-4.6">
@@ -3492,6 +3607,7 @@ Speak replies (TTS)</label>
 </div>
 
 <div class="card"><h2 style="margin-top:0">API keys (masked)</h2>
+<label>NanoGPT key (paste new to replace)</label><input id="nano_api_key" placeholder="sk-nano-...">
 <label>Groq key (paste new to replace)</label><input id="groq_api_key" placeholder="paste key">
 <label>Google key (paste new to replace)</label><input id="google_api_key" placeholder="paste key">
 <label>z.ai key (paste new to replace)</label><input id="zai_api_key" placeholder="z.ai API key...">
@@ -3505,10 +3621,10 @@ Speak replies (TTS)</label>
 <div id="result"></div>
 
 <script>
-const FIELDS = ['talk_key','tp_key','player_name','tts_engine','tts_voice','edge_voice','deepgram_model','tts_speed','tts_model','groq_models','google_model',
-  'llm_temperature','llm_max_tokens','groq_api_key','google_api_key','zai_api_key','deepgram_api_key','zai_models'];
+const FIELDS = ['talk_key','tp_key','player_name','tts_engine','tts_voice','edge_voice','deepgram_model','tts_speed','tts_model','nano_models','groq_models','google_model',
+  'llm_temperature','llm_max_tokens','nano_api_key','groq_api_key','google_api_key','zai_api_key','deepgram_api_key','zai_models'];
 const NUM = new Set(['tts_speed','llm_temperature','llm_max_tokens']);
-const ARR = new Set(['groq_models','zai_models']);
+const ARR = new Set(['nano_models','groq_models','zai_models']);
 
 async function load(){
   const cfg = await (await fetch('/api/config')).json();

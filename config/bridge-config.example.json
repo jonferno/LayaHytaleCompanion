@@ -1,4 +1,9 @@
 {
+  "nano_api_key": "",
+  "nano_base_url": "https://api.nano-gpt.com/api/v1",
+  "nano_models": [
+    "gemma-4-26b-a4b-it-chimeraxheretic"
+  ],
   "groq_api_key": "",
   "google_api_key": "",
   "zai_api_key": "",

@@ -9,7 +9,8 @@
 - Deepgram Aura is the default voice and needs a Deepgram API key.
 - Free API keys: [Groq](https://console.groq.com/keys),
   [z.ai](https://z.ai/manage-apikey/apikey), and
-  [Deepgram](https://console.deepgram.com/api-keys).
+  [Deepgram](https://console.deepgram.com/api-keys). The optional uncensored
+  primary uses a paid [NanoGPT](https://nano-gpt.com/api) key.
 - Kokoro TTS and Parakeet STT are optional local backups; their ~1 GB model
   download is not required for Deepgram.
 
@@ -77,9 +78,11 @@ Start the bridge:
 .\start.bat
 ```
 
-This opens <http://127.0.0.1:8788>. Paste a Groq, Google AI Studio, or z.ai key
-for the brain, and a Deepgram key for the default voice. You only need one LLM
-provider. The keys are written to `config\bridge-config.json` on your machine
+This opens <http://127.0.0.1:8788>. Paste a NanoGPT, Groq, Google AI Studio, or
+z.ai key for the brain, and a Deepgram key for the default voice. You only need
+one LLM provider. NanoGPT is tried first when configured and uses the uncensored
+`gemma-4-26b-a4b-it-chimeraxheretic` model by default; the other providers are
+fallbacks. The keys are written to `config\bridge-config.json` on your machine
 and are never part of the repo.
 
 Deepgram is the first-choice voice because it sounded the best in testing. The
