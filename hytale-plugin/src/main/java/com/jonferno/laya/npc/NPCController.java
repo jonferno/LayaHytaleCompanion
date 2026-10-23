@@ -13,6 +13,8 @@ import com.hypixel.hytale.protocol.packets.interface_.Page;
 import com.hypixel.hytale.server.core.asset.type.blocktype.config.BlockBreakingDropType;
 import com.hypixel.hytale.server.core.asset.type.blocktype.config.BlockGathering;
 import com.hypixel.hytale.server.core.asset.type.blocktype.config.BlockType;
+import com.hypixel.hytale.server.core.asset.type.blocktype.config.HarvestingDropType;
+import com.hypixel.hytale.server.core.asset.type.blocktype.config.SoftBlockDropType;
 import com.hypixel.hytale.server.core.Message;
 import com.hypixel.hytale.server.core.entity.entities.Player;
 import com.hypixel.hytale.server.core.entity.AnimationUtils;
@@ -2497,7 +2499,7 @@ public class NPCController {
         int radius = (radiusVal == null || radiusVal < 0) ? 0 : radiusVal;
 
         if (say != null && !say.isEmpty()) {
-            if (deliverSay) {
+            if (deliverSay && !extractJsonBool(json, "silent")) {
                 sayToPlayer(say);
             } else {
                 plugin.log("Laya says: " + say);
@@ -2514,12 +2516,26 @@ public class NPCController {
             handleTask(task, targetHint, count, scope, radius);
         }
 
+        // Whether THIS turn is itself starting a task. Her persona keeps
+        // `action: follow` while issuing a task ("the task itself walks you to the
+        // target"), so a follow action on a task turn must NOT cancel the task it
+        // just started - that self-destructed every gather/chop request.
+        boolean startingTask = task != null && !task.isEmpty()
+            && !"none".equalsIgnoreCase(task) && !"null".equalsIgnoreCase(task);
+
         if ("stop_task".equalsIgnoreCase(action)) {
             // Player said "stop mining" / "that's enough" / "never mind": cancel the
             // task AND any live fight, but KEEP following (a stop-task is not a stay).
             combat.requestCancel();
             handleStopTask();
         } else if ("follow".equalsIgnoreCase(action)) {
+            // An explicit "follow me" cancels a task that is already running, so she
+            // comes instead of staying on the job. It must NOT cancel the task this
+            // very turn is starting (startingTask): the LLM pairs a new task with
+            // action=follow, so cancelling here killed every new gather/chop.
+            if (!startingTask) {
+                handleStopTask();
+            }
             following = true;
             staying = false;
             state.put("mode", "follow");
@@ -3571,17 +3587,39 @@ public class NPCController {
             if (bt == null) return;
             BlockGathering gathering = bt.getGathering();
             if (gathering == null) return;
+
+            // A block declares its drop under ONE of four gathering types. The
+            // original code read only `breaking`, so soft clutter (all rubble,
+            // flint, ...) declared under `Soft` silently granted nothing: the
+            // block broke and her inventory never changed. Resolve the first
+            // type that is present, in the engine's own precedence order.
+            String itemId = null;
+            String dropListId = null;
+            int quantity = 1;
+
             BlockBreakingDropType breaking = gathering.getBreaking();
-            if (breaking == null) return;
+            HarvestingDropType harvest = gathering.getHarvest();
+            SoftBlockDropType soft = gathering.getSoft();
+
+            if (breaking != null) {
+                itemId = breaking.getItemId();
+                dropListId = breaking.getDropListId();
+                quantity = Math.max(1, breaking.getQuantity());
+            } else if (harvest != null) {
+                itemId = harvest.getItemId();
+                dropListId = harvest.getDropListId();
+            } else if (soft != null) {
+                itemId = soft.getItemId();
+                dropListId = soft.getDropListId();
+            }
 
             List<ItemStack> drops = new ArrayList<>();
-            String itemId = breaking.getItemId();
             if (itemId != null && !itemId.isEmpty()) {
-                drops.add(new ItemStack(itemId, Math.max(1, breaking.getQuantity())));
-            } else if (breaking.getDropListId() != null && !breaking.getDropListId().isEmpty()) {
+                drops.add(new ItemStack(itemId, quantity));
+            } else if (dropListId != null && !dropListId.isEmpty()) {
                 ItemModule itemModule = ItemModule.get();
                 if (itemModule != null) {
-                    drops.addAll(itemModule.getRandomItemDrops(breaking.getDropListId()));
+                    drops.addAll(itemModule.getRandomItemDrops(dropListId));
                 }
             }
             if (drops.isEmpty()) return;
@@ -3954,6 +3992,14 @@ public class NPCController {
         } catch (NumberFormatException e) {
             return null;
         }
+    }
+
+    /** Reads a top-level JSON boolean ("silent": true) from a raw body; false when absent.
+     *  extractJsonField returns the literal token for a non-quoted value, so "silent": true
+     *  arrives as the string "true". */
+    private boolean extractJsonBool(String json, String field) {
+        String v = extractJsonField(json, field);
+        return v != null && v.trim().equalsIgnoreCase("true");
     }
 
     private String layaEntityId = null;

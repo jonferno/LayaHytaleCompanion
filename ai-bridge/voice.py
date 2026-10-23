@@ -119,10 +119,10 @@ def _tp_loop(cfg):
 
 def _talk_loop(cfg, run_chat_fn, loop):
     if not HAS_KEYBOARD:
-        log("keyboard module missing - voice disabled")
+        log("keyboard module missing — voice disabled")
         return
     talk_key = cfg.get("talk_key", "x")
-    player = cfg.get("player_name", "player")
+    player = cfg.get("player_name", "Jonferno")
     stt = STT()
     # warm STT in background so the first press is fast
     threading.Thread(target=stt.warm, daemon=True).start()
@@ -180,6 +180,7 @@ def _talk_loop(cfg, run_chat_fn, loop):
             try:
                 cmd = resp.model_dump() if hasattr(resp, "model_dump") else dict(resp)
                 cmd.pop("audio_b64", None)
+                cmd["silent"] = True          # voice turn: she speaks it, don't print to chat
                 cmd_url = cfg.get("plugin_bridge_url", "http://127.0.0.1:8787/command")
                 with httpx.Client(timeout=5.0) as client:
                     cr = client.post(cmd_url, json=cmd)

@@ -84,6 +84,7 @@
     display: flex; gap: 10px; align-items: center; justify-content: center;
   }
   .actions .note { color: var(--muted); font-size: 12px; margin-left: 8px; }
+  .swatch { border: 1px solid var(--line); border-radius: 4px; background-size: cover; }
   .swatch-note { color: var(--muted); font-size: 11px; margin-top: 2px; }
 </style>
 </head>
@@ -127,6 +128,43 @@ function pretty(id) {
     .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+// A dropdown label that never shows a raw localization key. The plugin resolves
+// names already, but guard here too: if a value still looks like
+// "avatarCustomization.haircuts.Afro.name", show the last meaningful segment.
+function label(name, id) {
+  let s = (name != null && String(name).trim()) ? String(name).trim() : "";
+  if (s.includes("avatarCustomization") || (s.includes(".") && !s.includes(" "))) {
+    let key = s.endsWith(".name") ? s.slice(0, -5) : s;
+    const leaf = key.split(".").pop();
+    if (leaf) s = pretty(leaf);
+  }
+  return s || pretty(id);
+}
+
+// Gradient names have no texture; show a colour chip built from the name. Unknown
+// names get no chip (never a broken image).
+const GRADIENT_COLORS = {
+  brown: "#6b4b2a", browndark: "#46301b", brownlight: "#a67c52", brownsemi: "#8a6236",
+  blond: "#e3c76f", blondplatinum: "#efe6c4", blondcaramel: "#c99a4e",
+  blondstrawberry: "#d59a6b", blonde: "#e3c76f", blondsand: "#dcc38a",
+  black: "#111111", pitchblack: "#050505", grey: "#9aa0a6", greyash: "#8d9299",
+  greypurple: "#7a6f8f", white: "#f2f2f2", moldywhite: "#cfd6bb",
+  red: "#c0392b", reddark: "#7d1f14", pink: "#e98bb6", pinkberry: "#c95f8f",
+  bubblegum: "#f4a3cf", purple: "#7d5ba6", lilac: "#c8a2e0", lavender: "#d9c2f0",
+  blue: "#3f6fb5", bluelight: "#8fc0ea", bluedark: "#26406b",
+  blueanthracite: "#2b3a4a", turquoise: "#3fc0c0", green: "#4f9d5b",
+  green_anthracite: "#2e4a3a", greendark: "#2f6b3a", copper: "#b87333",
+};
+function gradientColor(name) {
+  if (!name) return "";
+  const k = String(name).replace(/[^a-z]/gi, "").toLowerCase();
+  if (GRADIENT_COLORS[k]) return GRADIENT_COLORS[k];
+  for (const key of Object.keys(GRADIENT_COLORS)) {
+    if (k.startsWith(key) || key.startsWith(k)) return GRADIENT_COLORS[key];
+  }
+  return "";
 }
 
 function setStatus(text, kind) {
@@ -176,10 +214,21 @@ function findPart(category, id) {
   return partsFor(category).find((p) => p.id === id) || null;
 }
 
+function texEntry(t) {
+  if (t && typeof t === "object") return t;
+  return { id: String(t), name: pretty(String(t)) };
+}
+
 function texturesFor(part, variant) {
   if (!part) return [];
   const out = [];
-  const add = (v) => { if (v && !out.includes(v)) out.push(v); };
+  const seen = new Set();
+  const add = (v) => {
+    const e = texEntry(v);
+    if (!e || e.id === undefined || e.id === null || seen.has(e.id)) return;
+    seen.add(e.id);
+    out.push(e);
+  };
   (part.gradients || []).forEach(add);
   if (variant && part.variants && part.variants[variant]) {
     (part.variants[variant] || []).forEach(add);
@@ -226,7 +275,7 @@ function build() {
     partLabel.textContent = "Part";
     const partOptions = [];
     if (category.optional) partOptions.push({ value: "", label: "(none)" });
-    for (const p of parts) partOptions.push({ value: p.id, label: pretty(p.id) });
+    for (const p of parts) partOptions.push({ value: p.id, label: label(p.name, p.id) });
     const partSel = makeSelect(partOptions, parsed.part || (category.optional ? "" : (parts[0] && parts[0].id)));
     partRow.appendChild(partLabel);
     partRow.appendChild(partSel);
@@ -250,6 +299,12 @@ function build() {
     const texSel = document.createElement("select");
     texRow.appendChild(texLabel);
     texRow.appendChild(texSel);
+    const swatch = document.createElement("img");
+    swatch.className = "swatch";
+    swatch.style.width = "32px"; swatch.style.height = "32px";
+    swatch.style.marginTop = "4px"; swatch.style.display = "none";
+    swatch.onerror = () => { swatch.style.display = "none"; };
+    texRow.appendChild(swatch);
     card.appendChild(texRow);
 
     const state = STATE[field] = { part: "", texture: "", variant: "" };
@@ -274,6 +329,45 @@ function build() {
       state.variant = variantSel.value;
     }
 
+    function updateSwatch() {
+      const part = findPart(category, partSel.value);
+      const opt = texSel.selectedOptions && texSel.selectedOptions[0];
+      const path = opt && opt._path;
+      const color = opt && opt._color;
+      // 1. A named texture (shoes, capes, ...): show it.
+      if (path) {
+        swatch.style.background = "";
+        swatch.src = "/api/cosmetic-texture?p=" + encodeURIComponent(path);
+        swatch.style.display = "";
+        return;
+      }
+      // 2. A base colour on the chosen texture entry: colour chip.
+      if (color) {
+        swatch.removeAttribute("src");
+        swatch.style.background = color;
+        swatch.style.display = "";
+        return;
+      }
+      // 3. Gradient-tinted part (hair, face, eyes, ears, mouth, body): show the
+      //    part's greyscale texture, so the shape is visible even untinted.
+      const grey = part && part.greyscale;
+      if (grey) {
+        swatch.style.background = "";
+        swatch.src = "/api/cosmetic-texture?p=" + encodeURIComponent(grey);
+        swatch.style.display = "";
+        return;
+      }
+      // 4. Gradient colour chip from the selected colour name.
+      const chip = gradientColor(texSel.value);
+      if (chip) {
+        swatch.removeAttribute("src");
+        swatch.style.background = chip;
+        swatch.style.display = "";
+        return;
+      }
+      swatch.style.display = "none";
+    }
+
     function refreshTextures(preferred) {
       const part = findPart(category, partSel.value);
       const variant = variantSel.value;
@@ -282,17 +376,22 @@ function build() {
       if (!opts.length) {
         texRow.classList.add("hidden");
         state.texture = "";
+        updateSwatch();
         return;
       }
       texRow.classList.remove("hidden");
-      for (const t of opts) {
+      for (const raw of opts) {
+        const t = texEntry(raw);
         const o = document.createElement("option");
-        o.value = t;
-        o.textContent = pretty(t);
+        o.value = t.id;
+        o.textContent = label(t.name, t.id);
+        o._path = t.path || "";
+        o._color = t.color || "";
         texSel.appendChild(o);
       }
-      if (preferred && opts.includes(preferred)) texSel.value = preferred;
+      if (preferred && opts.some((t) => texEntry(t).id === preferred)) texSel.value = preferred;
       state.texture = texSel.value;
+      updateSwatch();
     }
 
     function syncState() {
@@ -310,13 +409,17 @@ function build() {
         texRow.classList.add("hidden");
         state.variant = "";
         state.texture = "";
+        updateSwatch();
       }
     });
     variantSel.addEventListener("change", () => {
       refreshTextures(null);
       syncState();
     });
-    texSel.addEventListener("change", syncState);
+    texSel.addEventListener("change", () => {
+      syncState();
+      updateSwatch();
+    });
 
     // Initial values.
     if (parsed.part) {

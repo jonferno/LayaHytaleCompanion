@@ -26,5 +26,6 @@
   "vision_enabled": false,
   "talk_key": "x",
   "tp_key": "f8",
+  "personality": "default",
   "plugin_bridge_url": "http://127.0.0.1:8787/command"
 }

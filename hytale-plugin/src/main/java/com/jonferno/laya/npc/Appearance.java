@@ -11,6 +11,7 @@ import com.hypixel.hytale.server.core.asset.type.model.config.Model;
 import com.hypixel.hytale.server.core.cosmetics.CosmeticRegistry;
 import com.hypixel.hytale.server.core.cosmetics.CosmeticsModule;
 import com.hypixel.hytale.server.core.cosmetics.PlayerSkinPart;
+import com.hypixel.hytale.server.core.cosmetics.PlayerSkinPartTexture;
 import com.hypixel.hytale.server.core.modules.entity.component.ModelComponent;
 import com.hypixel.hytale.server.core.modules.entity.player.PlayerSkinComponent;
 import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
@@ -55,7 +56,7 @@ public final class Appearance {
     /** Config file; env override keeps parity with the other plugin config paths. */
     public static Path skinPath() {
         return Paths.get(System.getenv().getOrDefault(
-            "LAYA_SKIN_JSON", "config/laya-skin.json"));
+            "LAYA_SKIN_JSON", "D:/VibeCoding/LayaHytale/config/laya-skin.json"));
     }
 
     // --- build / validate -------------------------------------------------
@@ -222,6 +223,10 @@ public final class Appearance {
             if (part == null) continue;
             JsonObject p = new JsonObject();
             p.addProperty("id", part.getId());
+            // getName() is a LOCALIZATION KEY ("avatarCustomization.haircuts.Afro.name"),
+            // never the label. Resolve it to a display name; the page always has `id`
+            // as a fallback, so a raw key must never reach the dropdown.
+            p.addProperty("name", displayName(part));
 
             JsonArray gradients = new JsonArray();
             String gradientSet = withTexture ? part.getGradientSet() : null;
@@ -236,9 +241,32 @@ public final class Appearance {
             }
             p.add("gradients", gradients);
 
+            // Gradient-tinted parts (hair, face, eyes, ears, mouth, body) carry no
+            // named textures - only a single greyscale texture tinted by the chosen
+            // gradient. Emit it so the page can show a real preview for them too.
+            if (withTexture) {
+                if (gradientSet != null) p.addProperty("gradientSet", gradientSet);
+                String grey = safe(() -> part.getGreyscaleTexture());
+                if (grey != null && !grey.isBlank()) {
+                    p.addProperty("greyscale", toCommonAssetPath(grey));
+                }
+            }
+
             JsonArray textures = new JsonArray();
             if (withTexture && part.getTextures() != null) {
-                for (String t : part.getTextures().keySet()) textures.add(t);
+                for (var e : part.getTextures().entrySet()) {
+                    JsonObject t = new JsonObject();
+                    t.addProperty("id", e.getKey());
+                    t.addProperty("name", prettify(e.getKey()));
+                    PlayerSkinPartTexture tex = e.getValue();
+                    if (tex != null) {
+                        String tp = tex.getTexture();
+                        if (tp != null && !tp.isBlank()) t.addProperty("path", toCommonAssetPath(tp));
+                        String[] bc = tex.getBaseColor();
+                        if (bc != null && bc.length > 0 && bc[0] != null) t.addProperty("color", bc[0]);
+                    }
+                    textures.add(t);
+                }
             }
             p.add("textures", textures);
 
@@ -257,6 +285,80 @@ public final class Appearance {
         }
         cat.add("parts", list);
         out.add(cat);
+    }
+
+    /** GenericLong -> "Generic Long"; Default_48 -> "Default 48". */
+    private static String prettify(String id) {
+        if (id == null) return "";
+        String s = id.replace('_', ' ').replaceAll("([a-z0-9])([A-Z])", "$1 $2");
+        return s.trim();
+    }
+
+    /**
+     * A display name for a part. {@link PlayerSkinPart#getName()} is a localization
+     * KEY (e.g. "avatarCustomization.haircuts.Afro.name"), so a raw key must never be
+     * used as a label. Try the game's i18n module by reflection (no hard dependency on
+     * Hytale:I18nModule), then fall back to the last dotted segment prettified.
+     */
+    private static String displayName(PlayerSkinPart part) {
+        String raw = safe(() -> part.getName());
+        if (raw != null && !raw.isBlank()
+                && !raw.startsWith("avatarCustomization") && !raw.contains(".")) {
+            return raw;   // already a plain label
+        }
+        if (raw != null && raw.contains(".")) {
+            String localized = resolveI18n(raw);
+            if (localized != null && !localized.isBlank() && !localized.equals(raw)
+                    && !localized.startsWith("avatarCustomization")) {
+                return localized;
+            }
+            // Fall back to the key's own trailing id segment: ...haircuts.Afro.name -> Afro
+            String key = raw.endsWith(".name") ? raw.substring(0, raw.length() - 5) : raw;
+            int dot = key.lastIndexOf('.');
+            String leaf = (dot >= 0 && dot + 1 < key.length()) ? key.substring(dot + 1) : key;
+            return prettify(leaf);
+        }
+        return prettify(safe(() -> part.getId()));
+    }
+
+    /**
+     * Resolve a localization key via the i18n module, by reflection so the plugin does
+     * not need Hytale:I18nModule in its manifest Dependencies. Best effort: any failure
+     * returns null and the caller falls back to the prettified id.
+     */
+    private static String resolveI18n(String key) {
+        try {
+            Class<?> cls = Class.forName("com.hypixel.hytale.server.core.modules.i18n.I18nModule");
+            Object module = cls.getMethod("get").invoke(null);
+            if (module == null) return null;
+            String lang = (String) cls.getField("DEFAULT_LANGUAGE").get(null);
+            Object msg = cls.getMethod("getMessage", String.class, String.class)
+                .invoke(module, lang, key);
+            return msg instanceof String s ? s : null;
+        } catch (Throwable ignored) {
+            return null;
+        }
+    }
+
+    /**
+     * The registry returns model/texture paths relative to the asset root
+     * ("Characters/Haircuts/Afro.png", "Cosmetics/Shoes/..."); the packed assets live
+     * under "Common/". Normalise to a Common/... path the /texture endpoint can serve.
+     */
+    private static String toCommonAssetPath(String p) {
+        if (p == null || p.isBlank()) return p;
+        String s = p.replace('\\', '/').trim();
+        if (s.startsWith("Common/")) return s;
+        return "Common/" + s;
+    }
+
+    /** Run a supplier that may throw, returning null on any failure. */
+    private static <T> T safe(java.util.function.Supplier<T> s) {
+        try {
+            return s.get();
+        } catch (Throwable ignored) {
+            return null;
+        }
     }
 
     public static String summary(PlayerSkin s) {

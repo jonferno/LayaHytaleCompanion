@@ -32,6 +32,8 @@ from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel
 
 from stance import stance_intent, stance_ack, STANCE_ACKS
+from gearcheck import asks_about_gear
+from personalities import PERSONALITIES, personality_layer, DEFAULT_PERSONALITY
 
 BASE_DIR = Path(__file__).resolve().parent
 MODELS_DIR = BASE_DIR.parent / "models"
@@ -121,6 +123,9 @@ def load_config():
             "--model", str(BASE_DIR / "laya" / "typed-decisions"),
         ],
         "persona_prompt": str(BASE_DIR.parent / "config" / "laya-persona.txt"),
+        # Task 4: personality trait layer appended to the base persona. Unknown
+        # or missing values fall back to "default" (no layer).
+        "personality": "default",
         "voice_helper_enabled": True,
         "tp_key": "f8",
         # Plugin HTTP bridge surface the event reactions are pushed back to.
@@ -380,7 +385,13 @@ def load_persona():
             return f.read().strip()
     return """You are Laya, a loyal AI companion in the game Hytale. You speak concisely, with warmth and a touch of dry humor. You are in the world with the player, watching their back. When you speak, you also decide what to do: follow, attack, stay, or move. Always include a "say" line (what you say out loud) and an "action" line (what you do). Keep responses under 2 sentences."""
 
-PERSONA = load_persona()
+def build_persona() -> str:
+    base = load_persona()
+    layer = personality_layer(CFG.get("personality", DEFAULT_PERSONALITY))
+    return f"{base}\n\n{layer}" if layer else base
+
+
+PERSONA = build_persona()
 
 # ---------------------------------------------------------------------------
 # Persistent memory + Hytale game knowledge
@@ -462,21 +473,11 @@ def memory_block() -> str:
 # claim she had no axe right after the player put one in her inventory.
 INVENTORY_PATH = BASE_DIR.parent / "config" / "laya-inventory.json"
 _INVENTORY_SECTIONS = ("hotbar", "storage", "tools", "backpack", "utility", "armor")
-GEAR_QUESTION_RE = re.compile(
-    r"\b(inventory|pack|weapon|armor|shield|pickaxe|hatchet|sword|axe|axes|"
-    r"battleaxe|carrying|carry|holding|hold|held|hand|hands|equipped|"
-    r"equipment|gear|wield|wielding|pork|food|item)\b",
-    re.IGNORECASE,
-)
 EQUIP_WEAPON_RE = re.compile(
     r"\b(wield|equip|draw|ready|switch|swap|take out|bring out)\b"
     r"[^.!?]{0,40}\b(battleaxe|axe|sword|weapon|shield|blade)\b",
     re.IGNORECASE,
 )
-
-
-def asks_about_gear(message: str) -> bool:
-    return bool(GEAR_QUESTION_RE.search(message or ""))
 
 
 def wants_equip_weapon(message: str) -> bool:
@@ -2907,11 +2908,6 @@ async def run_chat(player: str, message: str, state: dict, with_audio: bool,
     knowledge = retrieve_knowledge(message)
     if knowledge:
         parts.append("Game knowledge (from Hytale's own data):\n" + "\n".join(f"- {k}" for k in knowledge))
-    inv = ""
-    if asks_about_gear(message):
-        inv = inventory_block()
-    if inv:
-        parts.append(inv)
     laya_state = (state or {}).get("laya") or {}
     appearance = ""
     if isinstance(laya_state, dict):
@@ -2919,8 +2915,16 @@ async def run_chat(player: str, message: str, state: dict, with_audio: bool,
     appearance_question = bool(re.search(
         r"\b(hairstyle|haircut|hair|appearance|outfit|clothes|wearing|dress|look)\b",
         (message or "").lower()))
-    if asks_about_gear(message) or appearance_question:
+    if asks_about_gear(message):
+        inv = inventory_block()
+        if inv:
+            parts.append(inv)
         gear = gear_block(state, include_appearance=appearance_question)
+        if gear:
+            parts.append(gear)
+    elif appearance_question:
+        # appearance-only question: still send the gear/appearance block
+        gear = gear_block(state, include_appearance=True)
         if gear:
             parts.append(gear)
     if appearance_question and appearance:
@@ -2933,7 +2937,10 @@ async def run_chat(player: str, message: str, state: dict, with_audio: bool,
     parts.append(
         "Use the live equipment/appearance line above for any question about "
         "what Laya is holding, wearing, or looks like; do not deny or contradict "
-        "it. Do not mention Laya's held item, armor, or appearance unless the "
+        "it. If an inventory or equipment line is present it is the whole truth "
+        "for that question; if nothing in it matches what the player asked "
+        "about, say so plainly, and never name an item that is not in that list. "
+        "Do not mention Laya's held item, armor, or appearance unless the "
         "player asks about it or it is directly relevant to their instruction. "
         "Answer the player's current message first; do not drag in earlier "
         "topics or gear from the previous conversation unless they are relevant "
@@ -3316,6 +3323,13 @@ async def list_voices():
             "emotions": list(EMOTION_SPEED.keys())}
 
 
+@app.get("/api/personalities")
+async def list_personalities():
+    """Personality trait layers, for the settings dropdown."""
+    return {"personalities": [{"key": k, "label": v["label"]} for k, v in PERSONALITIES.items()],
+            "current": CFG.get("personality", DEFAULT_PERSONALITY)}
+
+
 @app.get("/api/audio-devices")
 async def audio_devices():
     """List input/output audio devices for the settings page."""
@@ -3368,9 +3382,9 @@ async def save_config(request: Request):
     if "tts_model" in cleaned:
         threading.Thread(target=TTS.reload, daemon=True).start()
         log(f"TTS model change -> reloading {cleaned['tts_model']} in background")
-    if "persona_prompt" in body:
+    if "persona_prompt" in body or "personality" in cleaned:
         global PERSONA
-        PERSONA = load_persona()
+        PERSONA = build_persona()
     log(f"Config saved: {list(cleaned.keys())}")
     return {"ok": True, "updated": list(cleaned.keys())}
 
@@ -3505,6 +3519,24 @@ async def api_cosmetics():
             status_code=503)
 
 
+@app.get("/api/cosmetic-texture")
+async def api_cosmetic_texture(p: str = ""):
+    """Same-origin proxy for the plugin's cosmetic PNGs (path-guarded)."""
+    allowed_root = p.startswith("Common/Cosmetics/") or p.startswith("Common/Characters/")
+    if (".." in p or "\\" in p or p.startswith("/") or ":" in p
+            or not allowed_root or not p.lower().endswith(".png")):
+        return JSONResponse({"ok": False, "error": "bad path"}, status_code=404)
+    try:
+        async with httpx.AsyncClient(timeout=8) as client:
+            r = await client.get("http://127.0.0.1:8787/texture", params={"p": p})
+        if r.status_code != 200:
+            return JSONResponse({"ok": False}, status_code=404)
+        return Response(content=r.content, media_type="image/png",
+                        headers={"Cache-Control": "public, max-age=86400"})
+    except Exception:
+        return JSONResponse({"ok": False}, status_code=502)
+
+
 @app.post("/api/appearance")
 async def api_appearance(request: Request):
     """Forward one full skin to the plugin's set_appearance action."""
@@ -3558,6 +3590,7 @@ a.home:hover{color:#7ec8e3}
 </div>
 <div class="row">
 <div><label>Player name (in-game)</label><input id="player_name"></div>
+<div><label>Personality (tone layer)</label><select id="personality"></select></div>
 </div>
 <div class="row" style="align-items:flex-end">
 <div><label>TTS engine</label>
@@ -3621,7 +3654,7 @@ Speak replies (TTS)</label>
 <div id="result"></div>
 
 <script>
-const FIELDS = ['talk_key','tp_key','player_name','tts_engine','tts_voice','edge_voice','deepgram_model','tts_speed','tts_model','nano_models','groq_models','google_model',
+const FIELDS = ['talk_key','tp_key','player_name','personality','tts_engine','tts_voice','edge_voice','deepgram_model','tts_speed','tts_model','nano_models','groq_models','google_model',
   'llm_temperature','llm_max_tokens','nano_api_key','groq_api_key','google_api_key','zai_api_key','deepgram_api_key','zai_models'];
 const NUM = new Set(['tts_speed','llm_temperature','llm_max_tokens']);
 const ARR = new Set(['nano_models','groq_models','zai_models']);
@@ -3630,7 +3663,7 @@ async function load(){
   const cfg = await (await fetch('/api/config')).json();
   // 1. Simple text/number inputs first (arrays arrive as lists -> comma string)
   for(const f of FIELDS){
-    if(f==='tts_voice' || f==='edge_voice' || f==='deepgram_model') continue; // pickers, handled below
+    if(f==='tts_voice' || f==='edge_voice' || f==='deepgram_model' || f==='personality') continue; // pickers, handled below
     const el=document.getElementById(f);
     if(!el) continue;
     let v = cfg[f];
@@ -3650,6 +3683,10 @@ async function load(){
   const dcur = cfg['deepgram_model'] || 'aura-2-thalia-en';
   const dv = vs.deepgram_voices || [];
   dsel.innerHTML = dv.map(v=>'<option value="'+v.id+'"'+(v.id===dcur?' selected':'')+'>'+v.id+' - '+v.desc+'</option>').join('');
+  const ps = await (await fetch('/api/personalities')).json();
+  const psel = document.getElementById('personality');
+  const pcur = ps.current || cfg['personality'] || 'default';
+  psel.innerHTML = ps.personalities.map(p=>'<option value="'+p.key+'"'+(p.key===pcur?' selected':'')+'>'+p.label+'</option>').join('');
   document.getElementById('tts_enabled').checked = cfg['tts_enabled'] !== false;
   // 3. Status + device dropdowns
   const s = await (await fetch('/health')).json();

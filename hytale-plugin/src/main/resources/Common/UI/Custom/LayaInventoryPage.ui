@@ -1081,16 +1081,16 @@ Group {
         }
 
         Group #Gear {
-          Anchor: (Width: 96, Height: 310, Left: 10);
+          Anchor: (Width: 58, Height: 310, Left: 10);
           LayoutMode: Top;
           Label #GearLabel {
-            Anchor: (Left: 6);
+            Anchor: (Width: 58);
             Text: "Equipped";
-            Style: (FontSize: 16, RenderBold: true, TextColor: #FFFFFF);
+            Style: (FontSize: 16, RenderBold: true, TextColor: #FFFFFF, HorizontalAlignment: Center);
           }
 
           ItemSlotButton #Gear0 {
-            Anchor: (Width: 58, Height: 58, Top: 2, Left: 0);
+            Anchor: (Width: 58, Height: 58, Top: 2, Full: 0);
             Background: #243447;
 
             ItemSlot #Gear0Icon {
@@ -1103,7 +1103,7 @@ Group {
           }
 
           ItemSlotButton #Gear1 {
-            Anchor: (Width: 58, Height: 58, Top: 2, Left: 0);
+            Anchor: (Width: 58, Height: 58, Top: 2, Full: 0);
             Background: #243447;
 
             ItemSlot #Gear1Icon {
@@ -1116,7 +1116,7 @@ Group {
           }
 
           ItemSlotButton #Gear2 {
-            Anchor: (Width: 58, Height: 58, Top: 2, Left: 0);
+            Anchor: (Width: 58, Height: 58, Top: 2, Full: 0);
             Background: #243447;
 
             ItemSlot #Gear2Icon {
@@ -1129,7 +1129,7 @@ Group {
           }
 
           ItemSlotButton #Gear3 {
-            Anchor: (Width: 58, Height: 58, Top: 2, Left: 0);
+            Anchor: (Width: 58, Height: 58, Top: 2, Full: 0);
             Background: #243447;
 
             ItemSlot #Gear3Icon {
@@ -1142,7 +1142,7 @@ Group {
           }
 
           ItemSlotButton #Gear4 {
-            Anchor: (Width: 58, Height: 58, Top: 2, Left: 0);
+            Anchor: (Width: 58, Height: 58, Top: 2, Full: 0);
             Background: #243447;
 
             ItemSlot #Gear4Icon {

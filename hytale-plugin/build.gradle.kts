@@ -13,46 +13,30 @@ repositories {
     mavenCentral()
 }
 
-// Point this at the Hytale server JAR for your installed version:
-//   $env:HYTALE_SERVER_JAR = "D:\Games\Hytale\install\release\package\game\latest\Server\HytaleServer.jar"
-// or pass -PhytaleServerJar=...
-val hytaleServerJar: String =
-    providers.environmentVariable("HYTALE_SERVER_JAR").orNull
-        ?: (findProperty("hytaleServerJar") as String?)
-        ?: ""
-
+// Hytale server jar as a compile-only dependency
 dependencies {
-    if (hytaleServerJar.isBlank()) {
-        throw GradleException("Set HYTALE_SERVER_JAR or -PhytaleServerJar to HytaleServer.jar")
-    }
-    compileOnly(files(hytaleServerJar))
+    compileOnly(files("D:/Games/Hytale/install/release/package/game/latest/Server/HytaleServer.jar"))
 }
 
 tasks.named<Jar>("jar") {
     manifest {
         attributes(
-            "Main-Class" to (findProperty("main_class") as String? ?: "com.jonferno.laya.LayaPlugin")
+            "Main-Class" to main_class
         )
     }
     from(sourceSets.main.get().output)
+    // Include any resources
     from(sourceSets.main.get().resources)
 }
 
-// Optional: copy the built JAR straight into the game.
-//   $env:HYTALE_MODS_DIR = "D:\Games\Hytale\UserData\Mods"
-val hytaleModsDir: String =
-    providers.environmentVariable("HYTALE_MODS_DIR").orNull
-        ?: (findProperty("hytaleModsDir") as String?)
-        ?: ""
-
-if (hytaleModsDir.isNotBlank()) {
-    tasks.register<Copy>("copyToMods") {
-        dependsOn(tasks.named("jar"))
-        from(tasks.named<Jar>("jar").get().archiveFile)
-        into(hytaleModsDir)
-        duplicatesStrategy = DuplicatesStrategy.EXCLUDE
-    }
-    tasks.named("build") {
-        dependsOn("copyToMods")
-    }
+tasks.register("copyToMods", Copy) {
+    dependsOn(tasks.named("jar"))
+    from(tasks.named("jar").get().archiveFile.get())
+    into("D:/Games/Hytale/UserData/Mods")
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
 }
+
+tasks.named("build") {
+    dependsOn("copyToMods")
+}
+
