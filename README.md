@@ -46,8 +46,8 @@ pause. The speed comes from the architecture, not a single trick:
   me", and "stop" never wait for an LLM round-trip. The plugin applies the
   action immediately.
 - **The game state is local.** The plugin sends a live snapshot of Laya's held
-  item, armor, appearance, and player state over the local bridge. There is no
-  remote game server in the conversation path.
+  item, armor, appearance, the real in-game time, and player state over the local
+  bridge. There is no remote game server in the conversation path.
 - **Localhost only.** The plugin bridge uses `127.0.0.1:8787`; the AI bridge
   uses `127.0.0.1:8788`. No network hop is added beyond the model provider.
 
@@ -60,10 +60,24 @@ message. Exact numbers depend on the provider, GPU, and whether vision is used.
 - Follow you, hold position, defend, attack, and use the custom HUD.
 - Talk with a natural voice and a lip/mouth animation that follows speech.
 - Remember useful facts and recent conversation.
+- Answer truthfully about what she is carrying: her live pack, held item and armor
+  are injected into every turn, so she no longer invents weapons she does not have.
+- **Pick a personality** in Settings - default, spicy, potty mouth, mean, flirty,
+  depressed, military, or unhinged - as a trait layer over her base character.
 - Mine and gather with a deterministic task layer and block-name knowledge.
 - Use a custom inventory page with Laya's pack, gear slots, player inventory,
-  stacking, sorting, and click/double-click/right-click transfers.
+  stacking, sorting, and click/double-click/right-click transfers, and a centred
+  "Equipped" column.
+- **Break the silence on her own**: after two minutes without a message she looks
+  around (and sometimes at your screen) and says something about what you are
+  doing, spoken aloud with no chat text - then backs off to about five minutes.
 - Look at the player's screen when asked to, when screen vision is configured.
+- Know the real in-game time and reason about it (no more "before it's dark" at
+  midnight).
+- **Voice turns are spoken only** - hold the talk key and she answers out loud
+  without printing the line to chat; typed chat still shows the text.
+- Edit her whole character-creator look on the appearance page, with real part
+  names and texture previews, applied live and saved for next session.
 - Start fresh for each new player: no bundled keys, inventory, memory, or skin.
 
 ## Voice: Deepgram first
@@ -150,6 +164,7 @@ Hytale client
     |  Java plugin (hytale-plugin/)
     |  - custom HUD and inventory page
     |  - NPC movement, tasks, combat, gear
+    |  - area/time snapshot for idle banter
     |  - localhost HTTP bridge :8787
     v
 Python AI bridge (ai-bridge/)
@@ -157,13 +172,17 @@ Python AI bridge (ai-bridge/)
     - NanoGPT (uncensored primary) / Groq / Google / z.ai LLM clients
     - Deepgram Aura TTS (default); Edge + Kokoro backups
     - Parakeet ONNX STT for microphone input
+    - idle silence clock, personality layers, vision
     - resident laya.cpp decision server :8090
     v
 Hytale world state, speech, actions
 ```
 
 - `hytale-plugin/` - Java plugin, UI, NPC controller, inventory, combat.
-- `ai-bridge/` - Python sidecar: speech, LLM, memory, vision, decisions.
+- `ai-bridge/` - Python sidecar: speech, LLM, memory, vision, decisions, idle.
+- `ai-bridge/idlelogic.py` - idle-banter silence clock (unit-tested).
+- `ai-bridge/gearcheck.py` - gear-question matching for the inventory context.
+- `ai-bridge/personalities.py` - personality trait layers.
 - `config/blocks.json` - player words to Hytale block names.
 - `config/hytale-knowledge.json` - compact game-knowledge reference.
 - `config/laya-persona.txt` - Laya's persona and response contract.
@@ -183,6 +202,23 @@ gradle build
 
 The Gradle build uses `HYTALE_SERVER_JAR` and optionally `HYTALE_MODS_DIR`; it
 does not contain machine-specific paths.
+
+## Settings
+
+The web page at <http://127.0.0.1:8788> has two areas:
+
+- **Settings** - talk and teleport keys, voice engine and voices, audio devices,
+  LLM models and API keys, and the **personality** dropdown (default, spicy,
+  potty mouth, mean, flirty, depressed, military, unhinged).
+- **Laya Appearance Editor** - her full character-creator look, with real part
+  names and texture previews, applied live and saved.
+
+## Next up
+
+- **Farming.** Give Laya a farming task - "hoe this area and plant five seeds",
+  "plant any seeds you have", or "just one" - using seeds from her own pack, with
+  a farming icon on the HUD. Parked until the block-placement API is confirmed
+  for NPCs.
 
 ## Privacy and safety
 

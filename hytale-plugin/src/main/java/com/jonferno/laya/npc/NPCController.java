@@ -31,6 +31,8 @@ import com.hypixel.hytale.server.core.inventory.transaction.MoveTransaction;
 import com.hypixel.hytale.server.core.modules.entity.component.HeadRotation;
 import com.hypixel.hytale.server.core.modules.entity.tracker.NetworkId;
 import com.hypixel.hytale.protocol.packets.entities.PlayAnimation;import com.hypixel.hytale.server.core.modules.entity.component.TransformComponent;
+import com.hypixel.hytale.server.core.modules.time.WorldTimeResource;
+import com.hypixel.hytale.server.core.util.TargetUtil;
 import com.hypixel.hytale.server.core.cosmetics.CosmeticsModule;
 import com.hypixel.hytale.server.core.modules.entity.player.PlayerCreativeSettings;
 import com.hypixel.hytale.server.core.modules.entity.player.PlayerSettings;
@@ -140,6 +142,10 @@ public class NPCController {
         "LAYA_STATE_JSON", "config/laya-inventory.json");
     private static final double IDENTIFY_MAX_DIST = 6.4;   // 16 ray steps x 0.4 blocks
     private static final double SCAN_RADIUS = 16.0;        // mine/gather search radius (near the player)
+
+    // --- Idle banter: real area report (POST /idle_scene) ---
+    private static final double NEARBY_RADIUS = 24.0;      // entity scan sphere around the player
+    private static final int NEARBY_MAX = 8;               // cap on reported nearby entities
 
     // --- Task 5: break probe (dev verb "probe_break") ---
     // World-thread timed chain: immediate hit, then up to 6 hits 1500 ms apart.
@@ -458,6 +464,10 @@ public class NPCController {
             }
         } catch (Throwable ignored) {
         }
+        // Live world reads below (transform / nearby scan / world time). This method
+        // is called from the world thread (PlayerChatEvent), so no hop is needed here;
+        // the HTTP path uses idleSceneJson(), which marshals these same reads.
+        addPlayerPosition(player);
         root.add("player", player);
 
         JsonObject laya = new JsonObject();
@@ -494,8 +504,232 @@ public class NPCController {
         if (task != null) laya.addProperty("task", task);
         root.add("laya", laya);
 
-        root.add("nearby_entities", new JsonArray());
-        root.addProperty("time_of_day", "unknown");
+        root.add("nearby_entities", nearbyEntitiesJson());
+        root.addProperty("time_of_day", timeOfDay());
+        root.addProperty("time_of_day_hour", timeOfDayHour());
+        return root.toString();
+    }
+
+    /**
+     * Adds {@code x}/{@code y}/{@code z} from the player's live transform to the
+     * {@code player} object. A missing component or store leaves the keys absent.
+     * World-thread read — see {@link #stateSnapshotJson} and {@link #idleSceneJson}.
+     */
+    private void addPlayerPosition(JsonObject player) {
+        try {
+            if (playerRef == null || worldStore == null) return;
+            Ref<EntityStore> pe = playerRef.getReference();
+            if (pe == null) return;
+            TransformComponent t = worldStore.getComponent(pe, TransformComponent.getComponentType());
+            if (t == null) return;
+            Vector3d p = t.getPosition();
+            player.addProperty("x", p.x);
+            player.addProperty("y", p.y);
+            player.addProperty("z", p.z);
+        } catch (Throwable ignored) {
+        }
+    }
+
+    /**
+     * The nearest ≤{@link #NEARBY_MAX} non-Laya entities within {@link #NEARBY_RADIUS}
+     * of the player, as {@code [{"type":<roleName>,"distance":<rounded>}]}. Empty when
+     * nothing is in range or a read fails. World-thread read.
+     */
+    private JsonArray nearbyEntitiesJson() {
+        JsonArray arr = new JsonArray();
+        try {
+            if (playerRef == null || worldStore == null) return arr;
+            Ref<EntityStore> pe = playerRef.getReference();
+            if (pe == null) return arr;
+            TransformComponent pt = worldStore.getComponent(pe, TransformComponent.getComponentType());
+            if (pt == null) return arr;
+            Vector3d playerPos = pt.getPosition();
+
+            // Mirrors CombatController.nearestHostile's scan (TargetUtil sphere + roleOf).
+            List<Ref<EntityStore>> candidates =
+                TargetUtil.getAllEntitiesInSphere(playerPos, NEARBY_RADIUS, worldStore);
+            if (candidates == null) return arr;
+
+            // Distance -> ref, for the closest NEARBY_MAX non-Laya entries.
+            List<Ref<EntityStore>> kept = new ArrayList<>();
+            List<Double> keptDist = new ArrayList<>();
+            for (Ref<EntityStore> candidate : candidates) {
+                try {
+                    if (candidate == null || !candidate.isValid()) continue;
+                    // Skip Laya herself: same index+store comparison used by removeStaleClones.
+                    if (layaRef != null && layaRef.getIndex() == candidate.getIndex()
+                            && layaRef.getStore() == candidate.getStore()) {
+                        continue;
+                    }
+                    Vector3d pos = positionOf(candidate);
+                    if (pos == null) continue;
+                    double d = playerPos.distance(pos);
+                    if (Double.isNaN(d) || Double.isInfinite(d)) continue;
+                    int insert = 0;
+                    while (insert < keptDist.size() && keptDist.get(insert) <= d) insert++;
+                    kept.add(insert, candidate);
+                    keptDist.add(insert, d);
+                    if (kept.size() > NEARBY_MAX) {
+                        kept.remove(kept.size() - 1);
+                        keptDist.remove(keptDist.size() - 1);
+                    }
+                } catch (Throwable ignored) {
+                }
+            }
+            for (int i = 0; i < kept.size(); i++) {
+                JsonObject o = new JsonObject();
+                o.addProperty("type", roleOf(kept.get(i)));
+                o.addProperty("distance", Math.round(keptDist.get(i) * 10.0) / 10.0);
+                arr.add(o);
+            }
+        } catch (Throwable ignored) {
+        }
+        return arr;
+    }
+
+    /**
+     * The role name of an entity, or "target" when it cannot be read. Mirrors
+     * {@code CombatController.roleOf} — the same NPCEntity.getRoleName() pattern.
+     */
+    private String roleOf(Ref<EntityStore> ref) {
+        try {
+            if (ref == null || worldStore == null) return "target";
+            NPCEntity npc = worldStore.getComponent(ref, NPCEntity.getComponentType());
+            if (npc == null) return "target";
+            String role = npc.getRoleName();
+            return role == null || role.isEmpty() ? "target" : role;
+        } catch (Throwable t) {
+            return "target";
+        }
+    }
+
+    /** An entity's world position, or null when it cannot be read. */
+    private Vector3d positionOf(Ref<EntityStore> ref) {
+        try {
+            if (ref == null || worldStore == null) return null;
+            TransformComponent t = worldStore.getComponent(ref, TransformComponent.getComponentType());
+            return t == null ? null : t.getPosition();
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    /**
+     * Time of day as {@code "day" | "night" | "dawn" | "dusk"}, from the world's
+     * {@link WorldTimeResource}. Split is pinned here: 05-07 dawn, 07-19 day,
+     * 19-21 dusk, 21-05 night. "unknown" when the resource is unavailable.
+     * World-thread read.
+     */
+    private String timeOfDay() {
+        try {
+            if (worldStore == null) return "unknown";
+            WorldTimeResource time =
+                worldStore.getResource(WorldTimeResource.getResourceType());
+            if (time == null) return "unknown";
+            int hour = time.getGameDateTime().getHour();
+            if (hour >= 5 && hour < 7) return "dawn";
+            if (hour >= 7 && hour < 19) return "day";
+            if (hour >= 19 && hour < 21) return "dusk";
+            return "night";
+        } catch (Throwable t) {
+            return "unknown";
+        }
+    }
+
+    /**
+     * The in-game clock hour (0-23), or -1 when unreadable. Sent alongside
+     * {@link #timeOfDay()} so she can tell midday from late afternoon instead of
+     * guessing from a coarse bucket. World-thread read.
+     */
+    private int timeOfDayHour() {
+        try {
+            if (worldStore == null) return -1;
+            WorldTimeResource time =
+                worldStore.getResource(WorldTimeResource.getResourceType());
+            if (time == null) return -1;
+            return time.getGameDateTime().getHour();
+        } catch (Throwable t) {
+            return -1;
+        }
+    }
+
+    /**
+     * Full scene for the idle banter turn: the live area report the bridge's
+     * {@code POST /idle_scene} asks for. All live world reads (player transform,
+     * nearby scan, world time) are marshalled onto the world thread with
+     * {@code world.execute(...)}; this method itself runs on the HTTP request thread.
+     * Fail-closed: any failure, absence or timeout returns {@code {"busy":true}} and
+     * is logged once, and nothing is ever thrown back to the caller.
+     */
+    public String idleSceneJson() {
+        try {
+            World w = world;
+            if (w == null || worldStore == null) return "{\"busy\":true}";
+            CompletableFuture<String> result = new CompletableFuture<>();
+            w.execute(() -> {
+                try {
+                    result.complete(buildIdleSceneJson());
+                } catch (Throwable t) {
+                    result.completeExceptionally(t);
+                }
+            });
+            String json = result.get(2, TimeUnit.SECONDS);
+            return (json == null || json.isEmpty()) ? "{\"busy\":true}" : json;
+        } catch (Throwable t) {
+            plugin.log("idle_scene failed: " + t);
+            return "{\"busy\":true}";
+        }
+    }
+
+    /**
+     * Builds the idle-scene JSON on the world thread. {@code busy} = downed or
+     * engaged. Read-only: touches no combat/HP/task state.
+     */
+    private String buildIdleSceneJson() {
+        boolean downed = hudDowned();
+        boolean engaged = hudEngaged();
+
+        JsonObject root = new JsonObject();
+        root.addProperty("busy", downed || engaged);
+
+        JsonObject player = new JsonObject();
+        player.addProperty("name",
+            (playerRef != null && playerRef.getUsername() != null
+                && !playerRef.getUsername().isBlank())
+                ? playerRef.getUsername() : "player");
+        String heldItem = "";
+        try {
+            Inventory pinv = playerInventory();
+            if (pinv != null && pinv.getHotbar() != null) {
+                int active = pinv.getActiveHotbarSlot();
+                if (active >= 0 && active < pinv.getHotbar().getCapacity()) {
+                    ItemStack held = pinv.getHotbar().getItemStack((short) active);
+                    heldItem = held == null || held.getItemId() == null ? "" : held.getItemId();
+                }
+            }
+        } catch (Throwable ignored) {
+        }
+        player.addProperty("held_item", heldItem);
+        int health = -1;
+        try {
+            if (playerRef != null) health = (int) combat.hpOf(playerRef.getReference());
+        } catch (Throwable ignored) {
+        }
+        player.addProperty("health", health);
+        addPlayerPosition(player);
+        root.add("player", player);
+
+        root.add("nearby", nearbyEntitiesJson());
+        root.addProperty("time_of_day", timeOfDay());
+        root.addProperty("time_of_day_hour", timeOfDayHour());
+
+        JsonObject laya = new JsonObject();
+        laya.addProperty("health", hudHp());
+        laya.addProperty("stance", hudStance());
+        String task = hudTask();
+        laya.addProperty("task", task == null ? "" : task);
+        root.add("laya", laya);
+
         return root.toString();
     }
 

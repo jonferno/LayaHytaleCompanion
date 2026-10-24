@@ -33,6 +33,7 @@ from pydantic import BaseModel
 
 from stance import stance_intent, stance_ack, STANCE_ACKS
 from gearcheck import asks_about_gear
+from idlelogic import should_fire, idle_gap_ms
 from personalities import PERSONALITIES, personality_layer, DEFAULT_PERSONALITY
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -141,6 +142,14 @@ def load_config():
         "kokoro_onnx_model": str(MODELS_DIR / "kokoro-onnx" / "kokoro-v1.0.fp16.onnx"),
         "kokoro_onnx_voices": str(MODELS_DIR / "kokoro-onnx" / "voices-v1.0.bin"),
         "parakeet_onnx_dir": str(MODELS_DIR / "parakeet-onnx"),
+        # Idle banter: after idle_first_s of silence Laya may speak unprompted
+        # about what she can see or sense the player doing, then at most every
+        # idle_repeat_s. idle_vision_chance is the share of idle turns that ask
+        # the plugin for an area report (/idle_scene) instead of guessing.
+        "idle_banter_enabled": True,
+        "idle_first_s": 120,
+        "idle_repeat_s": 300,
+        "idle_vision_chance": 0.6,
     }
     if CONFIG_PATH.exists():
         try:
@@ -152,6 +161,19 @@ def load_config():
     return default
 
 CFG = load_config()
+
+# ---------------------------------------------------------------------------
+# Idle banter (Task 2): the silence clock's state.
+# The first fire keys off the gap since the player's last real message, so
+# _LAST_PLAYER_MSG_MS starts at import time (refreshed at startup) and a
+# restart can never fire instantly. _IDLE_LAST_FIRE_MS == 0 means "not fired
+# yet". _IDLE_BUSY guards one idle turn at a time and _TURN_ACTIVE marks a
+# normal reply in flight so an idle line never talks over the player's.
+# ---------------------------------------------------------------------------
+_LAST_PLAYER_MSG_MS = int(time.time() * 1000)
+_IDLE_LAST_FIRE_MS = 0
+_IDLE_BUSY = False
+_TURN_ACTIVE = False
 
 # ---------------------------------------------------------------------------
 # laya.cpp decision server client (Task 2)
@@ -461,7 +483,11 @@ def memory_block() -> str:
     if facts:
         parts.append("Facts Laya remembers:\n" + "\n".join(f"- {f}" for f in facts))
     chat = [c for c in MEMORY.get("chat", [])[-12:]
-            if c.get("p") and not str(c.get("p", "")).startswith("(observed:")]
+            if c.get("p")
+            and not str(c.get("p", "")).startswith("(observed:")
+            # Task 4: an idle line is Laya speaking unprompted, not a player
+            # turn - rendering it as "Player: (idle)" would fake one.
+            and not str(c.get("p", "")).startswith("(idle)")]
     if chat:
         lines = [f"Player: {c.get('p','')}\nLaya: {c.get('l','')}" for c in chat[-8:]]
         parts.append("Recent conversation:\n" + "\n".join(lines))
@@ -2883,342 +2909,354 @@ def clean_speech(raw: str) -> tuple[str, str, str]:
 async def run_chat(player: str, message: str, state: dict, with_audio: bool,
                    user_text_turn: bool = False) -> ChatResponse:
     """Core chat pipeline - used by both the HTTP endpoint and the in-process voice helper."""
-    start = time.time()
-    state_json = json.dumps(state, separators=(",", ":"))
-    # Combat Task 1: a pure deterministic command ("stop", "follow me", "stay
-    # here") is decided from the raw text - it needs neither the ~2.5 s vision
-    # capture nor the ~3 s LLM round-trip, both of which the guards below would
-    # only overwrite. `fast` is None for everything else, so the normal path is
-    # byte-identical for non-commands.
-    fast = fast_command(message)
-    # Task 8 (vision): only user-originated turns may look at the player's screen
-    # (typed chat via POST /chat + the voice loop), and only when the message
-    # actually asks her to look ("look at this", "what's going on", ...). This
-    # keeps the normal chat path free of the ~2.5 s capture + describe cost.
-    look = fast is None and user_text_turn and wants_vision(message)
-    # Task 0: baseline turn timing (measurement only)
-    t0 = time.time()
-    vision_desc = await capture_and_describe(look, message)
-    t_vision = time.time()
-    # Persistent memory + retrieved game knowledge go into every prompt
-    parts = []
-    mem = memory_block()
-    if mem:
-        parts.append(mem)
-    knowledge = retrieve_knowledge(message)
-    if knowledge:
-        parts.append("Game knowledge (from Hytale's own data):\n" + "\n".join(f"- {k}" for k in knowledge))
-    laya_state = (state or {}).get("laya") or {}
-    appearance = ""
-    if isinstance(laya_state, dict):
-        appearance = str(laya_state.get("appearance") or "").strip()
-    appearance_question = bool(re.search(
-        r"\b(hairstyle|haircut|hair|appearance|outfit|clothes|wearing|dress|look)\b",
-        (message or "").lower()))
-    if asks_about_gear(message):
-        inv = inventory_block()
-        if inv:
-            parts.append(inv)
-        gear = gear_block(state, include_appearance=appearance_question)
-        if gear:
-            parts.append(gear)
-    elif appearance_question:
-        # appearance-only question: still send the gear/appearance block
-        gear = gear_block(state, include_appearance=True)
-        if gear:
-            parts.append(gear)
-    if appearance_question and appearance:
+    # Idle banter (Task 4): stamp the silence clock and mark a turn in
+    # flight. The try/finally clears the flag on EVERY exit (run_chat has
+    # several returns); no existing statement was reordered or changed.
+    global _LAST_PLAYER_MSG_MS, _TURN_ACTIVE
+    _LAST_PLAYER_MSG_MS = int(time.time() * 1000)
+    _TURN_ACTIVE = True
+    try:
+        start = time.time()
+        state_json = json.dumps(state, separators=(",", ":"))
+        # Combat Task 1: a pure deterministic command ("stop", "follow me", "stay
+        # here") is decided from the raw text - it needs neither the ~2.5 s vision
+        # capture nor the ~3 s LLM round-trip, both of which the guards below would
+        # only overwrite. `fast` is None for everything else, so the normal path is
+        # byte-identical for non-commands.
+        fast = fast_command(message)
+        # Task 8 (vision): only user-originated turns may look at the player's screen
+        # (typed chat via POST /chat + the voice loop), and only when the message
+        # actually asks her to look ("look at this", "what's going on", ...). This
+        # keeps the normal chat path free of the ~2.5 s capture + describe cost.
+        look = fast is None and user_text_turn and wants_vision(message)
+        # Task 0: baseline turn timing (measurement only)
+        t0 = time.time()
+        vision_desc = await capture_and_describe(look, message)
+        t_vision = time.time()
+        # Persistent memory + retrieved game knowledge go into every prompt
+        parts = []
+        mem = memory_block()
+        if mem:
+            parts.append(mem)
+        knowledge = retrieve_knowledge(message)
+        if knowledge:
+            parts.append("Game knowledge (from Hytale's own data):\n" + "\n".join(f"- {k}" for k in knowledge))
+        laya_state = (state or {}).get("laya") or {}
+        appearance = ""
+        if isinstance(laya_state, dict):
+            appearance = str(laya_state.get("appearance") or "").strip()
+        appearance_question = bool(re.search(
+            r"\b(hairstyle|haircut|hair|appearance|outfit|clothes|wearing|dress|look)\b",
+            (message or "").lower()))
+        if asks_about_gear(message):
+            inv = inventory_block()
+            if inv:
+                parts.append(inv)
+            gear = gear_block(state, include_appearance=appearance_question)
+            if gear:
+                parts.append(gear)
+        elif appearance_question:
+            # appearance-only question: still send the gear/appearance block
+            gear = gear_block(state, include_appearance=True)
+            if gear:
+                parts.append(gear)
+        if appearance_question and appearance:
+            parts.append(
+                "The player is asking about Laya's appearance. The authoritative "
+                "appearance above is the answer: reply directly and in character about "
+                "that hair/outfit. Do not say you cannot see, do not talk about trusting "
+                "a description, and do not give a generic companion line."
+            )
         parts.append(
-            "The player is asking about Laya's appearance. The authoritative "
-            "appearance above is the answer: reply directly and in character about "
-            "that hair/outfit. Do not say you cannot see, do not talk about trusting "
-            "a description, and do not give a generic companion line."
+            "Use the live equipment/appearance line above for any question about "
+            "what Laya is holding, wearing, or looks like; do not deny or contradict "
+            "it. If an inventory or equipment line is present it is the whole truth "
+            "for that question; if nothing in it matches what the player asked "
+            "about, say so plainly, and never name an item that is not in that list. "
+            "Do not mention Laya's held item, armor, or appearance unless the "
+            "player asks about it or it is directly relevant to their instruction. "
+            "Answer the player's current message first; do not drag in earlier "
+            "topics or gear from the previous conversation unless they are relevant "
+            "to what the player just said. If the player says they see something, "
+            "treat that observation as true and respond to it naturally even when "
+            "you have no vision line."
         )
-    parts.append(
-        "Use the live equipment/appearance line above for any question about "
-        "what Laya is holding, wearing, or looks like; do not deny or contradict "
-        "it. If an inventory or equipment line is present it is the whole truth "
-        "for that question; if nothing in it matches what the player asked "
-        "about, say so plainly, and never name an item that is not in that list. "
-        "Do not mention Laya's held item, armor, or appearance unless the "
-        "player asks about it or it is directly relevant to their instruction. "
-        "Answer the player's current message first; do not drag in earlier "
-        "topics or gear from the previous conversation unless they are relevant "
-        "to what the player just said. If the player says they see something, "
-        "treat that observation as true and respond to it naturally even when "
-        "you have no vision line."
-    )
-    parts.append(f"Game state: {state_json}\n{player or 'Player'} says: {message}\nLaya:")
-    prompt = "\n\n".join(parts)
+        tl = time_line(state)
+        if tl:
+            parts.append(tl)
+        parts.append(f"Game state: {state_json}\n{player or 'Player'} says: {message}\nLaya:")
+        prompt = "\n\n".join(parts)
 
-    # Task 8 (vision): the system line is appended ONLY when a description came
-    # back. description None -> no line, so a capture/vision failure can never
-    # make Laya claim she "saw" something (the persona bans that).
-    vision_system = ""
-    if vision_desc:
-        vision_system = (
-            f'You can see the player\'s screen right now. Visible: "{vision_desc}". '
-            f'Ground every claim about the scene in that description only: name what it '
-            f'names, and if something is not in it, say you cannot make it out rather '
-            f'than guessing. Lead with what is in the center of the view.'
+        # Task 8 (vision): the system line is appended ONLY when a description came
+        # back. description None -> no line, so a capture/vision failure can never
+        # make Laya claim she "saw" something (the persona bans that).
+        vision_system = ""
+        if vision_desc:
+            vision_system = (
+                f'You can see the player\'s screen right now. Visible: "{vision_desc}". '
+                f'Ground every claim about the scene in that description only: name what it '
+                f'names, and if something is not in it, say you cannot make it out rather '
+                f'than guessing. Lead with what is in the center of the view.'
+            )
+
+        # Task 7: stream the LLM reply when the flag is on. Streaming is armed for
+        # every turn so the `Stream:` measurement and the metadata-safety check run
+        # on typed turns too. Audio is ALWAYS synthesized as one full clip (see the
+        # TTS block below): capture.py can only play a single full clip, so
+        # per-sentence synthesis would add cost with no gain. All streaming turn
+        # state lives in the `_on_sentence` closure — no module-global mutable state.
+        t_stream_first = [None]
+        stream_sentences: list[str] = []
+        streaming = bool(CFG.get("llm_stream"))
+
+        async def _on_sentence(sentence: str) -> None:
+            # Last-line defence: never hand anything control-shaped to TTS. The
+            # stream already filters metadata lines, but a callback must be safe
+            # even if a future caller misuses it.
+            if not CFG.get("tts_enabled", True):
+                return
+            if not _is_speakable(sentence) or _is_control_prefix(sentence):
+                return
+            stream_sentences.append(sentence)
+            if t_stream_first[0] is None:
+                t_stream_first[0] = time.time()
+            # No per-sentence synthesis: capture.py plays one full clip, so a
+            # per-sentence path would only add cost (see MODLOG). _StreamTts remains
+            # as groundwork for a future capture.py partial-audio channel.
+
+        raw = "" if fast else await LLM.generate(
+            prompt,
+            system_extra=vision_system,
+            on_sentence=_on_sentence if streaming else None,
         )
+        t_llm = time.time()
 
-    # Task 7: stream the LLM reply when the flag is on. Streaming is armed for
-    # every turn so the `Stream:` measurement and the metadata-safety check run
-    # on typed turns too. Audio is ALWAYS synthesized as one full clip (see the
-    # TTS block below): capture.py can only play a single full clip, so
-    # per-sentence synthesis would add cost with no gain. All streaming turn
-    # state lives in the `_on_sentence` closure — no module-global mutable state.
-    t_stream_first = [None]
-    stream_sentences: list[str] = []
-    streaming = bool(CFG.get("llm_stream"))
+        # Requirement 2 (metadata safety): the union of streamed sentences must be
+        # the spoken line, not a control line. Log lengths + a boolean per turn.
+        if streaming and stream_sentences:
+            _verify_stream_text(stream_sentences, raw)
 
-    async def _on_sentence(sentence: str) -> None:
-        # Last-line defence: never hand anything control-shaped to TTS. The
-        # stream already filters metadata lines, but a callback must be safe
-        # even if a future caller misuses it.
-        if not CFG.get("tts_enabled", True):
-            return
-        if not _is_speakable(sentence) or _is_control_prefix(sentence):
-            return
-        stream_sentences.append(sentence)
-        if t_stream_first[0] is None:
-            t_stream_first[0] = time.time()
-        # No per-sentence synthesis: capture.py plays one full clip, so a
-        # per-sentence path would only add cost (see MODLOG). _StreamTts remains
-        # as groundwork for a future capture.py partial-audio channel.
-
-    raw = "" if fast else await LLM.generate(
-        prompt,
-        system_extra=vision_system,
-        on_sentence=_on_sentence if streaming else None,
-    )
-    t_llm = time.time()
-
-    # Requirement 2 (metadata safety): the union of streamed sentences must be
-    # the spoken line, not a control line. Log lengths + a boolean per turn.
-    if streaming and stream_sentences:
-        _verify_stream_text(stream_sentences, raw)
-
-    if fast:
-        # Combat Task 1: the tuple is authoritative - no model line to parse.
-        action, say_line = fast
-        emotion = ""
-        log(f"Fast command: {action}")
-    else:
-        say_line, action, emotion = clean_speech(raw)
-    action = action or "follow"
-    tx = None
-    tz = None
-    remember_line = ""
-    task = ""
-    target_hint = ""
-    model_count = None
-
-    for line in raw.split("\n"):
-        line = line.strip()
-        if line.lower().startswith("remember:"):
-            remember_line = line[9:].strip()
-        elif line.lower().startswith("task:"):
-            task = line[5:].strip().lower()
-        elif line.lower().startswith("target_hint:"):
-            target_hint = line[12:].strip().lower()
-        elif line.lower().startswith("count:"):
-            try:
-                model_count = int(line[6:].strip())
-            except ValueError:
-                pass
-        elif line.lower().startswith("target_x:"):
-            try:
-                tx = float(line[9:].strip())
-            except ValueError:
-                pass
-        elif line.lower().startswith("target_z:"):
-            try:
-                tz = float(line[9:].strip())
-            except ValueError:
-                pass
-
-    if task in ("none", "null", "no task"):
+        if fast:
+            # Combat Task 1: the tuple is authoritative - no model line to parse.
+            action, say_line = fast
+            emotion = ""
+            log(f"Fast command: {action}")
+        else:
+            say_line, action, emotion = clean_speech(raw)
+        action = action or "follow"
+        tx = None
+        tz = None
+        remember_line = ""
         task = ""
         target_hint = ""
+        model_count = None
 
-    # Cycle 5: deterministic intent leg. A cancel cue always wins (and must
-    # never be re-read as a new task); otherwise a strong verb + hint word
-    # forces the task even when the model refuses from stale memory.
-    # Combat Task 1: a fast command already decided the action - skip the whole
-    # leg (stop-task ordering for non-fast messages is unchanged below).
-    if not fast and wants_stop_task(message):
-        log("Guard: stop-task cue -> action=stop_task")
-        action = "stop_task"
-        task = ""
-        target_hint = ""
-    else:
-        det_task, det_hint = detect_task(message)
-        if det_task:
-            # The raw text is authoritative: a stale-memory refusal or a
-            # wrong verb (gather for ore) can't suppress the real request.
-            if task != det_task or target_hint != det_hint:
-                log(f"Guard: deterministic task overrides model -> {det_task} hint={det_hint}")
-            task, target_hint = det_task, det_hint or ""
-        elif det_task and not target_hint:
-            target_hint = det_hint or ""
-    if (task in ("mine", "gather") and target_hint
-            and target_hint.lower() in WOOD_SPECIES
-            and re.search(r"\b(trees?|wood|logs?|chop|cut|fell)\b", (message or "").lower())):
-        target_hint = "wood"
-    if task and not det_task and is_creature_attack(message):
-        log(f"Guard: creature attack clears model task '{task}'")
-        task = ""
-        target_hint = ""
-    count = derive_task_count(message, task, model_count, target_hint)
-    scope = derive_task_scope(message, task, target_hint, count)
-    radius = derive_task_radius(message, task, target_hint, count)
-    if task in ("mine", "gather"):
-        log(f"Task intent: {task} hint={target_hint or '?'} count={count if count else 'all'}"
-            f" scope={scope or '-'} radius={radius or 'default'}")
-        # Cycle 11b: a forced task always speaks its own acknowledgement. The
-        # model line was written before the task existed and can echo a stale
-        # failure from memory; this line names what she is about to do.
-        ack = task_ack(task, target_hint, scope, count)
-        if (say_line or "").strip() != ack:
-            log(f"Guard: task ack replaces model line -> {ack}")
-        say_line = ack
+        for line in raw.split("\n"):
+            line = line.strip()
+            if line.lower().startswith("remember:"):
+                remember_line = line[9:].strip()
+            elif line.lower().startswith("task:"):
+                task = line[5:].strip().lower()
+            elif line.lower().startswith("target_hint:"):
+                target_hint = line[12:].strip().lower()
+            elif line.lower().startswith("count:"):
+                try:
+                    model_count = int(line[6:].strip())
+                except ValueError:
+                    pass
+            elif line.lower().startswith("target_x:"):
+                try:
+                    tx = float(line[9:].strip())
+                except ValueError:
+                    pass
+            elif line.lower().startswith("target_z:"):
+                try:
+                    tz = float(line[9:].strip())
+                except ValueError:
+                    pass
 
-    # "Wield/switch to your battleaxe" is an equipment order even without the
-    # word defend. The plugin treats defend as the guarded weapon-ready stance.
-    if action != "stop_task" and wants_equip_weapon(message):
-        if action != "defend":
-            log(f"Guard: weapon equip cue -> action={action} -> defend")
-        action = "defend"
+        if task in ("none", "null", "no task"):
+            task = ""
+            target_hint = ""
 
-    # Cycle 12: explicit stance commands are deterministic. The model used to
-    # answer "follow me" with stay (or stay put after "follow me"); the raw
-    # text decides, and the spoken line confirms it. A fast command already
-    # holds the same deterministic result, so only non-fast messages re-derive.
-    if not fast and action != "stop_task":
-        guarded_action, guarded_say = apply_stance_guard(message, action, say_line)
-        if guarded_action != action:
-            log(f"Guard: stance cue -> action={guarded_action} (kept model line)")
-        action, say_line = guarded_action, guarded_say
+        # Cycle 5: deterministic intent leg. A cancel cue always wins (and must
+        # never be re-read as a new task); otherwise a strong verb + hint word
+        # forces the task even when the model refuses from stale memory.
+        # Combat Task 1: a fast command already decided the action - skip the whole
+        # leg (stop-task ordering for non-fast messages is unchanged below).
+        if not fast and wants_stop_task(message):
+            log("Guard: stop-task cue -> action=stop_task")
+            action = "stop_task"
+            task = ""
+            target_hint = ""
+        else:
+            det_task, det_hint = detect_task(message)
+            if det_task:
+                # The raw text is authoritative: a stale-memory refusal or a
+                # wrong verb (gather for ore) can't suppress the real request.
+                if task != det_task or target_hint != det_hint:
+                    log(f"Guard: deterministic task overrides model -> {det_task} hint={det_hint}")
+                task, target_hint = det_task, det_hint or ""
+            elif det_task and not target_hint:
+                target_hint = det_hint or ""
+        if (task in ("mine", "gather") and target_hint
+                and target_hint.lower() in WOOD_SPECIES
+                and re.search(r"\b(trees?|wood|logs?|chop|cut|fell)\b", (message or "").lower())):
+            target_hint = "wood"
+        if task and not det_task and is_creature_attack(message):
+            log(f"Guard: creature attack clears model task '{task}'")
+            task = ""
+            target_hint = ""
+        count = derive_task_count(message, task, model_count, target_hint)
+        scope = derive_task_scope(message, task, target_hint, count)
+        radius = derive_task_radius(message, task, target_hint, count)
+        if task in ("mine", "gather"):
+            log(f"Task intent: {task} hint={target_hint or '?'} count={count if count else 'all'}"
+                f" scope={scope or '-'} radius={radius or 'default'}")
+            # Cycle 11b: a forced task always speaks its own acknowledgement. The
+            # model line was written before the task existed and can echo a stale
+            # failure from memory; this line names what she is about to do.
+            ack = task_ack(task, target_hint, scope, count)
+            if (say_line or "").strip() != ack:
+                log(f"Guard: task ack replaces model line -> {ack}")
+            say_line = ack
 
-    # Fix cycle 4b: `stay` only on an explicit cue. The follow ring is gated on
-    # taskLive, so following through a task is safe and - if the task is refused -
-    # she keeps walking with the player instead of standing where she stopped.
-    if action == "stay" and not wants_stay(message):
-        log("Guard: unprompted action=stay -> follow")
-        action = "follow"
+        # "Wield/switch to your battleaxe" is an equipment order even without the
+        # word defend. The plugin treats defend as the guarded weapon-ready stance.
+        if action != "stop_task" and wants_equip_weapon(message):
+            if action != "defend":
+                log(f"Guard: weapon equip cue -> action={action} -> defend")
+            action = "defend"
 
-    # Never let a non-combat/non-gift conversational sentence change those states.
-    if not fast and not task:
-        if (action == "attack" and stance_intent(message) != "attack"
-                and not is_creature_attack(message)):
-            log("Guard: unprompted action=attack -> follow")
-            action = "follow"
-        if action == "gift_hand" and not re.search(
-                r"\b(gift|give|take|hand|hold|offer|have this)\b",
-                (message or "").lower()):
-            log("Guard: unprompted action=gift_hand -> follow")
+        # Cycle 12: explicit stance commands are deterministic. The model used to
+        # answer "follow me" with stay (or stay put after "follow me"); the raw
+        # text decides, and the spoken line confirms it. A fast command already
+        # holds the same deterministic result, so only non-fast messages re-derive.
+        if not fast and action != "stop_task":
+            guarded_action, guarded_say = apply_stance_guard(message, action, say_line)
+            if guarded_action != action:
+                log(f"Guard: stance cue -> action={guarded_action} (kept model line)")
+            action, say_line = guarded_action, guarded_say
+
+        # Fix cycle 4b: `stay` only on an explicit cue. The follow ring is gated on
+        # taskLive, so following through a task is safe and - if the task is refused -
+        # she keeps walking with the player instead of standing where she stopped.
+        if action == "stay" and not wants_stay(message):
+            log("Guard: unprompted action=stay -> follow")
             action = "follow"
 
-    # Name-aware attack: let the plugin match a named creature ("kill those pigs")
-    # even when it is a protected passive and the crosshair is not on it.
-    if action == "attack" and not task:
-        target_hint = (message or "").strip()[:120]
+        # Never let a non-combat/non-gift conversational sentence change those states.
+        if not fast and not task:
+            if (action == "attack" and stance_intent(message) != "attack"
+                    and not is_creature_attack(message)):
+                log("Guard: unprompted action=attack -> follow")
+                action = "follow"
+            if action == "gift_hand" and not re.search(
+                    r"\b(gift|give|take|hand|hold|offer|have this)\b",
+                    (message or "").lower()):
+                log("Guard: unprompted action=gift_hand -> follow")
+                action = "follow"
 
-    if not say_line:
-        say_line = "I'm here."
+        # Name-aware attack: let the plugin match a named creature ("kill those pigs")
+        # even when it is a protected passive and the crosshair is not on it.
+        if action == "attack" and not task:
+            target_hint = (message or "").strip()[:120]
 
-    # Persistent memory: store notable facts + conversation history
-    if remember_line and len(remember_line) > 4:
-        existing = [f.lower() for f in MEMORY.get("facts", [])]
-        if remember_line.lower() not in existing:
-            MEMORY.setdefault("facts", []).append(remember_line)
-            if len(MEMORY["facts"]) > 40:
-                MEMORY["facts"] = MEMORY["facts"][-40:]
-            log(f"Remembered: {remember_line}")
-    MEMORY.setdefault("chat", []).append({"p": message, "l": say_line})
-    if len(MEMORY["chat"]) > 16:
-        MEMORY["chat"] = MEMORY["chat"][-16:]
-    save_memory()
+        if not say_line:
+            say_line = "I'm here."
 
-    options = ["follow", "attack", "defend", "stay", "move_to"]
-    # Task 9: "gift_hand" is a real action verb the persona can emit (Task 7's
-    # gift), but it is NOT part of the decision engine's option set. Without this
-    # guard the persona's `action: gift_hand` would be overwritten by
-    # DECISION.decide(...) and never reach the plugin (whose applyCommand does
-    # handle gift_hand). Pass it straight through; keep `options` unchanged so the
-    # decision engine can never spontaneously gift.
-    if action not in options and action not in ("gift_hand", "stop_task"):
-        # Combat Task 1: a fast command's action is final - never hand it to the
-        # (possibly remote) decision engine, which would add latency for nothing.
-        if not fast:
-            action = DECISION.decide(state_json, options)
+        # Persistent memory: store notable facts + conversation history
+        if remember_line and len(remember_line) > 4:
+            existing = [f.lower() for f in MEMORY.get("facts", [])]
+            if remember_line.lower() not in existing:
+                MEMORY.setdefault("facts", []).append(remember_line)
+                if len(MEMORY["facts"]) > 40:
+                    MEMORY["facts"] = MEMORY["facts"][-40:]
+                log(f"Remembered: {remember_line}")
+        MEMORY.setdefault("chat", []).append({"p": message, "l": say_line})
+        if len(MEMORY["chat"]) > 16:
+            MEMORY["chat"] = MEMORY["chat"][-16:]
+        save_memory()
 
-    t_decision = time.time()
+        options = ["follow", "attack", "defend", "stay", "move_to"]
+        # Task 9: "gift_hand" is a real action verb the persona can emit (Task 7's
+        # gift), but it is NOT part of the decision engine's option set. Without this
+        # guard the persona's `action: gift_hand` would be overwritten by
+        # DECISION.decide(...) and never reach the plugin (whose applyCommand does
+        # handle gift_hand). Pass it straight through; keep `options` unchanged so the
+        # decision engine can never spontaneously gift.
+        if action not in options and action not in ("gift_hand", "stop_task"):
+            # Combat Task 1: a fast command's action is final - never hand it to the
+            # (possibly remote) decision engine, which would add latency for nothing.
+            if not fast:
+                action = DECISION.decide(state_json, options)
 
-    audio_b64 = None
-    failure_reply = is_llm_failure(say_line)
-    if failure_reply:
-        # All providers down: this is a status notice, not speech. Keep it in
-        # the chat window but never synthesize it (voice or background file).
-        log("TTS skipped: LLM failure reply (no provider answered)")
-    elif not CFG.get("tts_enabled", True):
-        # Task 7: master switch off - no voice audio, no background file.
-        log("TTS skipped: tts_enabled is off")
+        t_decision = time.time()
+
         audio_b64 = None
-    elif with_audio:
-        try:
+        failure_reply = is_llm_failure(say_line)
+        if failure_reply:
+            # All providers down: this is a status notice, not speech. Keep it in
+            # the chat window but never synthesize it (voice or background file).
+            log("TTS skipped: LLM failure reply (no provider answered)")
+        elif not CFG.get("tts_enabled", True):
+            # Task 7: master switch off - no voice audio, no background file.
+            log("TTS skipped: tts_enabled is off")
+            audio_b64 = None
+        elif with_audio:
+            try:
+                import asyncio as _asyncio
+                speed = EMOTION_SPEED.get(emotion, CFG["tts_speed"])
+                if emotion:
+                    log(f"Emotion: {emotion} -> speed {speed}")
+                # Task 7 fix: ALWAYS synthesize the whole spoken line as one clip.
+                # capture.py plays a single full clip via blocking sd.play/sd.wait,
+                # so per-sentence synthesis + stitching only added ~1.7 s with no
+                # early playback. This keeps the voice audio cost identical to the
+                # flag-off path while the reply is still streamed for lower latency
+                # to the caller (say/action returned as soon as the text is done).
+                wav_bytes = await _asyncio.get_event_loop().run_in_executor(
+                    None, lambda: TTS.synthesize(say_line, voice=CFG["tts_voice"], speed=speed))
+                audio_b64 = base64.b64encode(wav_bytes).decode("ascii") if wav_bytes else None
+            except Exception as e:
+                log(f"TTS error: {e}")
+        else:
+            # Typed-chat path: reply fast, synthesize voice in the background and
+            # write it to logs/laya-say.wav - the in-process poller plays new files.
+            # Task 7: this path is NEVER streamed; behavior is byte-identical.
             import asyncio as _asyncio
-            speed = EMOTION_SPEED.get(emotion, CFG["tts_speed"])
-            if emotion:
-                log(f"Emotion: {emotion} -> speed {speed}")
-            # Task 7 fix: ALWAYS synthesize the whole spoken line as one clip.
-            # capture.py plays a single full clip via blocking sd.play/sd.wait,
-            # so per-sentence synthesis + stitching only added ~1.7 s with no
-            # early playback. This keeps the voice audio cost identical to the
-            # flag-off path while the reply is still streamed for lower latency
-            # to the caller (say/action returned as soon as the text is done).
-            wav_bytes = await _asyncio.get_event_loop().run_in_executor(
-                None, lambda: TTS.synthesize(say_line, voice=CFG["tts_voice"], speed=speed))
-            audio_b64 = base64.b64encode(wav_bytes).decode("ascii") if wav_bytes else None
-        except Exception as e:
-            log(f"TTS error: {e}")
-    else:
-        # Typed-chat path: reply fast, synthesize voice in the background and
-        # write it to logs/laya-say.wav - the in-process poller plays new files.
-        # Task 7: this path is NEVER streamed; behavior is byte-identical.
-        import asyncio as _asyncio
-        _asyncio.get_event_loop().create_task(_background_tts(say_line, emotion))
+            _asyncio.get_event_loop().create_task(_background_tts(say_line, emotion))
 
-    elapsed = (time.time() - start) * 1000
-    log(f"Responded in {elapsed:.0f}ms")
+        elapsed = (time.time() - start) * 1000
+        log(f"Responded in {elapsed:.0f}ms")
 
-    # Task 7 measurement: one line per streamed turn. first_sentence is the
-    # wall time from turn start to the first sentence handed to TTS; total is
-    # the whole turn. Kept alongside (not replacing) the Turn timing line.
-    t_end = time.time()
-    if streaming and t_stream_first[0] is not None:
-        log(f"Stream: first_sentence {(t_stream_first[0] - t0) * 1000:.0f}ms, "
-            f"total {(t_end - t0) * 1000:.0f}ms, chars {len(raw)}")
+        # Task 7 measurement: one line per streamed turn. first_sentence is the
+        # wall time from turn start to the first sentence handed to TTS; total is
+        # the whole turn. Kept alongside (not replacing) the Turn timing line.
+        t_end = time.time()
+        if streaming and t_stream_first[0] is not None:
+            log(f"Stream: first_sentence {(t_stream_first[0] - t0) * 1000:.0f}ms, "
+                f"total {(t_end - t0) * 1000:.0f}ms, chars {len(raw)}")
 
-    # Task 0: baseline turn timing (one line per turn)
-    log(f"Turn timing: total {(t_end - t0) * 1000:.0f}ms "
-        f"(vision {(t_vision - t0) * 1000:.0f}, llm {(t_llm - t_vision) * 1000:.0f}, "
-        f"decision {(t_decision - t_llm) * 1000:.0f}, tts {(t_end - t_decision) * 1000:.0f})")
+        # Task 0: baseline turn timing (one line per turn)
+        log(f"Turn timing: total {(t_end - t0) * 1000:.0f}ms "
+            f"(vision {(t_vision - t0) * 1000:.0f}, llm {(t_llm - t_vision) * 1000:.0f}, "
+            f"decision {(t_decision - t_llm) * 1000:.0f}, tts {(t_end - t_decision) * 1000:.0f})")
 
-    return ChatResponse(
-        say=say_line,
-        action=action,
-        target_x=tx,
-        target_z=tz,
-        task=task if task and task != "none" else None,
-        target_hint=target_hint if target_hint and target_hint != "none" else None,
-        count=count if task and task != "none" else None,
-        scope=scope if task and task != "none" else None,
-        radius=radius if task and task != "none" and radius else None,
-        audio_b64=audio_b64,
-    )
+        return ChatResponse(
+            say=say_line,
+            action=action,
+            target_x=tx,
+            target_z=tz,
+            task=task if task and task != "none" else None,
+            target_hint=target_hint if target_hint and target_hint != "none" else None,
+            count=count if task and task != "none" else None,
+            scope=scope if task and task != "none" else None,
+            radius=radius if task and task != "none" and radius else None,
+            audio_b64=audio_b64,
+        )
+    finally:
+        _TURN_ACTIVE = False
 
 
 # ---------------------------------------------------------------------------
@@ -3226,6 +3264,246 @@ async def run_chat(player: str, message: str, state: dict, with_audio: bool,
 # ---------------------------------------------------------------------------
 
 PLUGIN_COMMAND_URL = CFG.get("plugin_bridge_url", "http://127.0.0.1:8787/command")
+# Task 4: the area-report endpoint lives on the same plugin bridge. Derive it
+# from the one configured URL instead of hardcoding the host (finding 1), once
+# at module scope.
+PLUGIN_IDLE_SCENE_URL = PLUGIN_COMMAND_URL.rstrip("/")
+if PLUGIN_IDLE_SCENE_URL.endswith("/command"):
+    PLUGIN_IDLE_SCENE_URL = PLUGIN_IDLE_SCENE_URL[: -len("/command")]
+PLUGIN_IDLE_SCENE_URL += "/idle_scene"
+
+
+async def fetch_idle_scene() -> Optional[dict]:
+    """Area report from the plugin for the idle turn; None on any failure."""
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            r = await client.post(PLUGIN_IDLE_SCENE_URL)
+        if r.status_code != 200:
+            return None
+        data = r.json()
+        return data if isinstance(data, dict) else None
+    except Exception as e:
+        log(f"idle scene fetch failed: {e}")
+        return None
+
+
+# Task 3 (idle banter): the system instruction for the unprompted turn. It is a
+# module constant so the wording is reviewable in one place and identical on every
+# fire. The turn carries NO action/task/stance - it must never change her behavior.
+_IDLE_SYSTEM = (
+    "You are Laya. You are breaking a silence: the player has not spoken for a "
+    "while, so you speak up unprompted with ONE short line - a comment, a question "
+    "or a dry joke - about what you can see or sense the player doing. Ground the "
+    "line ONLY in the area report below and, when present, the vision line. Never "
+    "invent what you did not observe: if something is not in the report or the "
+    "vision line, do not claim it. Do not ask what to do next, do not mention "
+    "orders, tasks or actions, and do not change your behavior. Keep it under "
+    "about two sentences. Reply with a single line beginning with 'say:'."
+)
+
+
+def _fmt_num(v) -> str:
+    """Best-effort number formatting for the area block (blank on junk)."""
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return ""
+    return f"{f:.1f}".rstrip("0").rstrip(".")
+
+
+def time_line(state: dict) -> str:
+    """A plain-language clock line for the prompt, or "" when unreadable.
+
+    Laya used to read only a coarse bucket out of the raw state JSON and once
+    warned "before it's dark" in the middle of the night. Give her the clock hour
+    and say plainly what it means, so she never guesses at the time again.
+    """
+    if not isinstance(state, dict):
+        return ""
+    tod = str(state.get("time_of_day") or "").strip().lower()
+    hour = state.get("time_of_day_hour")
+    try:
+        h = int(hour)
+    except (TypeError, ValueError):
+        h = -1
+    if h < 0 and tod in ("", "unknown"):
+        return ""
+    parts = []
+    if 0 <= h <= 23:
+        parts.append(f"{h:02d}:00")
+    if tod and tod != "unknown":
+        parts.append(tod)
+    when = " ".join(parts) if parts else (tod or "unknown")
+    return (f"Time in game: it is {when}. "
+            "This is the authoritative time - never say it is getting dark, "
+            "or about to be night, when it is already night, and never guess "
+            "the time when this line is present.")
+
+
+def _idle_area_block(scene: dict) -> str:
+    """Compact, grounded area block for the idle prompt, from the /idle_scene report.
+
+    Only fields the report actually carries are printed, so the model can never be
+    nudged to narrate something absent. player.health is -1 when the plugin could
+    not read it (unreadable) - that is printed as unknown, never as real HP.
+    """
+    lines = []
+    player = scene.get("player") if isinstance(scene.get("player"), dict) else {}
+    if player:
+        held = str(player.get("held_item") or "").strip()
+        lines.append(f"- Player held item: {held or 'unknown (empty hand or unreadable)'}")
+        health = player.get("health")
+        try:
+            hp = int(health)
+        except (TypeError, ValueError):
+            hp = -1
+        if hp < 0:
+            lines.append("- Player health: unknown (not readable this frame)")
+        else:
+            lines.append(f"- Player health: {hp}")
+        pos = [player.get(a) for a in ("x", "y", "z")]
+        if all(p is not None for p in pos):
+            lines.append(f"- Player position: x={_fmt_num(pos[0])}, "
+                         f"y={_fmt_num(pos[1])}, z={_fmt_num(pos[2])}")
+    tod = str(scene.get("time_of_day") or "").strip()
+    try:
+        tod_h = int(scene.get("time_of_day_hour"))
+    except (TypeError, ValueError):
+        tod_h = -1
+    if tod and tod.lower() != "unknown":
+        if 0 <= tod_h <= 23:
+            lines.append(f"- Time of day: {tod} ({tod_h:02d}:00)")
+        else:
+            lines.append(f"- Time of day: {tod}")
+    nearby = scene.get("nearby")
+    if isinstance(nearby, list):
+        if nearby:
+            items = []
+            for n in nearby[:8]:
+                if not isinstance(n, dict):
+                    continue
+                t = str(n.get("type") or "something").strip()
+                d = _fmt_num(n.get("distance"))
+                items.append(f"{t} at {d} blocks" if d else t)
+            if items:
+                lines.append("- Nearby: " + "; ".join(items))
+        else:
+            lines.append("- Nearby: nothing in range")
+    laya = scene.get("laya") if isinstance(scene.get("laya"), dict) else {}
+    if laya:
+        stance = str(laya.get("stance") or "").strip()
+        task = str(laya.get("task") or "").strip()
+        if stance:
+            lines.append(f"- Laya's stance: {stance}")
+        if task:
+            lines.append(f"- Laya's current task: {task}")
+    if not lines:
+        return "Area report contained no readable details."
+    return "\n".join(lines)
+
+
+async def _idle_turn():
+    """One unprompted, voice-only line after the player has gone quiet.
+
+    Task 3: called by the idle loop (Task 4) with `_IDLE_BUSY` already held. It
+    observes (/idle_scene area report + maybe a screenshot), makes ONE LLM call and
+    delivers the line through the WAV queue only. It carries no action/task/stance
+    and NEVER posts to the plugin's /command surface, so nothing appears in chat.
+    It does NOT stamp _LAST_PLAYER_MSG_MS (only real player turns do).
+    """
+    turn_start_ms = int(time.time() * 1000)
+    try:
+        # Step 1: fresh area report. busy (downed/engaged) or absent -> skip.
+        scene = await fetch_idle_scene()
+        if scene is None or scene.get("busy"):
+            log("Idle banter skipped: no scene/busy")
+            return
+
+        # Step 2: vision is a coin flip on an idle turn. The capture is a blocking
+        # subprocess, so it MUST run in an executor - never on the event loop.
+        use_vision = (bool(CFG.get("vision_enabled", True))
+                      and random.random() < float(CFG.get("idle_vision_chance", 0.6)))
+        vision_desc = None
+        if use_vision:
+            try:
+                png = await asyncio.get_event_loop().run_in_executor(
+                    None, _capture_scene_png)
+                if png:
+                    vision_desc = await _describe_image(png, "what the player is doing")
+            except Exception as e:
+                log(f"idle vision skipped: {e}")
+                vision_desc = None
+        # A capture/describe failure is not fatal: the turn falls back to area-only.
+
+        # Step 3: prompt = _IDLE_SYSTEM + PERSONA + area block + optional vision block.
+        parts = [_IDLE_SYSTEM, PERSONA]
+        parts.append("What you can sense around the player right now:\n"
+                     + _idle_area_block(scene))
+        if vision_desc:
+            parts.append('What you can see on the player\'s screen right now: "'
+                         + str(vision_desc) + '". Ground any claim about the scene '
+                         "in that description only; if it is not there, do not "
+                         "claim it.")
+        parts.append("Say your one line now, voice only.\nLaya:")
+        prompt = "\n\n".join(parts)
+
+        # Step 4: one LLM call. generate() returns a failure string rather than
+        # raising, so is_llm_failure gates the TTS; an empty say is also a no-op.
+        raw = await LLM.generate(prompt, system_extra="")
+        say, _action, emotion = clean_speech(raw)
+        if is_llm_failure(raw) or not say:
+            log("Idle banter produced nothing - not speaking")
+            return
+
+        # Step 5: suppression, checked immediately before the WAV is written. The
+        # player may have spoken while the LLM call was in flight.
+        if _LAST_PLAYER_MSG_MS > turn_start_ms:
+            log("Idle banter suppressed: player spoke")
+            return
+
+        # Step 6: deliver voice-only. No /command POST - the line never hits chat.
+        if CFG.get("tts_enabled", True):
+            await _background_tts(say, emotion)
+        else:
+            log("Idle banter TTS skipped: tts_enabled=false")
+        MEMORY.setdefault("chat", []).append({"p": "(idle)", "l": say})
+        # Task 4 (finding 2): trim like the normal path does, so idle lines
+        # cannot grow the history unbounded ahead of the next real turn.
+        if len(MEMORY["chat"]) > 16:
+            MEMORY["chat"] = MEMORY["chat"][-16:]
+        save_memory()
+
+        # Step 7: one greppable line per fire.
+        gap_s = idle_gap_ms(int(time.time() * 1000), _LAST_PLAYER_MSG_MS) // 1000
+        log(f"Idle banter: {say} (vision={'yes' if vision_desc else 'no'}, gap={gap_s}s)")
+    except Exception as e:
+        log(f"Idle banter failed: {e}")
+
+
+async def _idle_loop():
+    """Background: fire one unprompted line after the player goes quiet."""
+    global _IDLE_BUSY, _IDLE_LAST_FIRE_MS
+    while True:
+        await asyncio.sleep(15)
+        try:
+            if not CFG.get("idle_banter_enabled", True):
+                continue
+            if _IDLE_BUSY or _TURN_ACTIVE:
+                continue
+            now = int(time.time() * 1000)
+            first_ms = int(float(CFG.get("idle_first_s", 120)) * 1000)
+            repeat_ms = int(float(CFG.get("idle_repeat_s", 300)) * 1000)
+            if not should_fire(now, _LAST_PLAYER_MSG_MS, _IDLE_LAST_FIRE_MS,
+                               first_ms, repeat_ms):
+                continue
+            _IDLE_BUSY = True
+            try:
+                await _idle_turn()
+                _IDLE_LAST_FIRE_MS = now
+            finally:
+                _IDLE_BUSY = False
+        except Exception as e:
+            log(f"idle loop error: {e}")
 
 
 async def _react_to_event(event: str, detail: str):
@@ -3801,6 +4079,16 @@ async def warmup():
     """
     import asyncio
     log("Appearance editor: http://127.0.0.1:8788/appearance")
+
+    # Task 4: refresh the silence clock at startup so a restart can never fire
+    # an idle line instantly, then start the one background scheduler task.
+    global _LAST_PLAYER_MSG_MS
+    _LAST_PLAYER_MSG_MS = int(time.time() * 1000)
+    if CFG.get("idle_banter_enabled", True):
+        asyncio.get_event_loop().create_task(_idle_loop())
+        log("Idle banter scheduler started")
+    else:
+        log("Idle banter scheduler disabled (idle_banter_enabled=false)")
 
     try:
         await asyncio.get_event_loop().run_in_executor(None, _start_laya_server)

@@ -23,6 +23,7 @@ import java.util.concurrent.TimeUnit;
  * Endpoints:
  *   GET  /ping    - health check
  *   POST /command - receive AI commands (follow, attack, say, etc.) and apply them in-game
+ *   POST /idle_scene - live area report (player position, nearby entities, time of day)
  */
 public class Bridge {
 
@@ -53,6 +54,7 @@ public class Bridge {
             server.createContext("/command", exchange -> handleCommand(exchange));
             server.createContext("/tp", exchange -> handleTp(exchange));
             server.createContext("/cosmetics", exchange -> handleCosmetics(exchange));
+            server.createContext("/idle_scene", exchange -> handleIdleScene(exchange));
             server.createContext("/texture", exchange -> handleTexture(exchange));
             server.start();
 
@@ -137,6 +139,30 @@ public class Bridge {
         } catch (IOException e) {
             try {
                 respond(exchange, 500, "{\"error\":\"tp failed\"}");
+            } catch (IOException ignored) {
+            }
+        }
+    }
+
+    /**
+     * POST /idle_scene — the live area report for an idle banter turn. Mirrors
+     * {@link #handleCosmetics}: require POST, read nothing from the body, and answer
+     * with {@code NPCController.idleSceneJson()}. Fail-closed: any throwable answers
+     * {@code {"busy":true}} (logged once) so the bridge can skip the turn.
+     */
+    private void handleIdleScene(HttpExchange exchange) {
+        try {
+            if (!exchange.getRequestMethod().equalsIgnoreCase("POST")) {
+                respond(exchange, 405, "{\"busy\":true}");
+                return;
+            }
+            exchange.getRequestBody().readAllBytes();   // drain, body is unused
+            String json = LayaPlugin.get().getNPCController().idleSceneJson();
+            respond(exchange, 200, json);
+        } catch (Throwable t) {
+            LayaPlugin.log("Idle scene response error: " + t);
+            try {
+                respond(exchange, 200, "{\"busy\":true}");
             } catch (IOException ignored) {
             }
         }
