@@ -14,6 +14,10 @@
   <code>Python 3.11</code> &nbsp;|&nbsp; <code>laya.cpp required</code>
 </p>
 
+<p align="center">
+  <strong>Tested on Hytale 0.7.4.</strong>
+</p>
+
 ## Why is she called Laya?
 
 Laya is named after **[laya.cpp](https://github.com/lkarlslund/laya.cpp)**, the
@@ -191,7 +195,7 @@ Hytale world state, speech, actions
 ## Build the plugin
 
 The repository ships `dist/LayaPlugin-0.2.0.jar`. It is built against the 0.7.x
-server API and was rebuilt for Hytale 0.7.3. If Hytale changes its API again,
+server API and is **tested on Hytale 0.7.4**. If Hytale changes its API again,
 rebuild from source:
 
 ```powershell
