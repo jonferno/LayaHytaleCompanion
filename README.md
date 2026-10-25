@@ -72,6 +72,9 @@ message. Exact numbers depend on the provider, GPU, and whether vision is used.
 - **Pick a personality** in Settings - default, spicy, potty mouth, mean, flirty,
   depressed, military, or unhinged - as a trait layer over her base character.
 - Mine and gather with a deterministic task layer and block-name knowledge.
+- **Farm**: till a plot in front of you and plant seeds from her pack or a nearby
+  chest - "plant five carrot seeds", "plant any seeds you have", "just seed" - see
+  the Farming section below. A farming icon appears on the HUD while she works.
 - Use a custom inventory page with Laya's pack, gear slots, player inventory,
   stacking, sorting, and click/double-click/right-click transfers, and a centred
   "Equipped" column.
@@ -88,6 +91,42 @@ message. Exact numbers depend on the provider, GPU, and whether vision is used.
 - Edit her whole character-creator look on the appearance page, with real part
   names and texture previews, applied live and saved for next session.
 - Start fresh for each new player: no bundled keys, inventory, memory, or skin.
+
+## Farming
+
+Ask her in plain words and she does the whole job herself - walk to the plot, till
+the soil, plant the seed, and tell you what she actually planted (counted from the
+block entities, not from what she meant to do).
+
+```
+plant five carrot seeds here
+plant any seeds you have
+just seed
+hoe this area and plant cauliflower
+plant 10 eternal wheat seeds
+```
+
+- **The patch is in front of you**: up to 5 x 5 cells, starting two rows ahead, sized
+  to the number of seeds you asked for. `0` / "all" means every seed of that crop she
+  can reach.
+- **Seeds come from her pack first**, then from any chest within 5 blocks; whatever she
+  takes out of a chest she tells you about. If there are none she refuses and says so
+  instead of miming the job.
+- **Eternal vs normal seeds.** Eternal crops regrow after harvest, normal ones are
+  consumed. If she can reach both kinds she asks which ones to plant before starting;
+  if only one kind is reachable she uses it silently. Name the kind to skip the question.
+- **She needs a hoe.** Tilling spends tool durability, and a worn-out hoe does nothing
+  at all, so she checks before she swings, holds the one with the most life left, and
+  goes looking in nearby chests for a spare when hers breaks - and tells you when there
+  is no spare instead of swinging a dead tool.
+- **She walks where the work is.** If the ground stops the engine's straight-line mover
+  and she stalls on the spot, she steps beside the cell and carries on rather than
+  giving up on it.
+- **Say "stop"** at any time to end the task.
+
+Farming is till-and-plant today. Harvesting, and the layout that doubles growth rate by
+putting a light source in the middle of the plot (Hytale's `LightLevel` growth modifier,
+x2, works with a lamp or torch alone), are the next steps.
 
 ## In-game commands
 
@@ -200,15 +239,17 @@ Hytale world state, speech, actions
 - `ai-bridge/` - Python sidecar: speech, LLM, memory, vision, decisions, idle.
 - `ai-bridge/idlelogic.py` - idle-banter silence clock (unit-tested).
 - `ai-bridge/gearcheck.py` - gear-question matching for the inventory context.
+- `ai-bridge/farming.py` - farm-request parsing: crop, count, seed kind.
+
 - `ai-bridge/personalities.py` - personality trait layers.
 - `config/blocks.json` - player words to Hytale block names.
 - `config/hytale-knowledge.json` - compact game-knowledge reference.
 - `config/laya-persona.txt` - Laya's persona and response contract.
-- `dist/LayaPlugin-0.2.0.jar` - convenience plugin build.
+- `dist/LayaPlugin-0.3.0.jar` - convenience plugin build.
 
 ## Build the plugin
 
-The repository ships `dist/LayaPlugin-0.2.0.jar`. It is built against the 0.7.x
+The repository ships `dist/LayaPlugin-0.3.0.jar`. It is built against the 0.7.x
 server API and is **tested on Hytale 0.7.4**. If Hytale changes its API again,
 rebuild from source:
 
@@ -234,10 +275,11 @@ The web page at <http://127.0.0.1:8788> has two areas:
 
 ## Next up
 
-- **Farming.** Give Laya a farming task - "hoe this area and plant five seeds",
-  "plant any seeds you have", or "just one" - using seeds from her own pack, with
-  a farming icon on the HUD. Parked until the block-placement API is confirmed
-  for NPCs.
+- **Harvesting**, so a planted field can be reaped instead of only sown.
+- **The light-boosted layout**: Hytale grows crops up to twice as fast when a light
+  source sits in the middle of the plot (`LightLevel` growth modifier, x2, satisfied
+  by a lamp or torch alone), so the next layout will place the light and ring the
+  crops around it.
 
 ## Privacy and safety
 

@@ -211,7 +211,7 @@ public final class LayaHud extends CustomUIHud {
 
     /** Icon/ring ids in the .ui. Exactly one is shown at a time via Value 1. */
     private static final String[] ICONS = {
-        "Follow", "Attack", "Defend", "Mine", "Chop", "Gather", "Stay", "Downed"
+        "Follow", "Attack", "Defend", "Mine", "Chop", "Gather", "Farm", "Stay", "Downed"
     };
 
     /** State word -> icon. Downed is passed explicitly from the caller. */
@@ -223,6 +223,7 @@ public final class LayaHud extends CustomUIHud {
             case "mining", "mine" -> "Mine";
             case "chopping", "chop" -> "Chop";
             case "gathering", "gather" -> "Gather";
+            case "farming", "farm", "planting", "tilling" -> "Farm";
             case "holding", "stay" -> "Stay";
             case "downed" -> "Downed";
             default -> "Follow";

@@ -38,6 +38,8 @@ import com.hypixel.hytale.server.core.modules.entity.player.PlayerCreativeSettin
 import com.hypixel.hytale.server.core.modules.entity.player.PlayerSettings;
 import com.hypixel.hytale.server.core.modules.entity.player.PlayerSkinComponent;
 import com.hypixel.hytale.server.core.modules.item.ItemModule;
+import com.hypixel.hytale.server.core.modules.block.BlockModule;
+import com.hypixel.hytale.server.core.modules.block.components.ItemContainerBlock;
 import com.hypixel.hytale.server.core.modules.interaction.BlockHarvestUtils;
 import com.hypixel.hytale.server.core.modules.physics.util.PhysicsMath;
 import com.hypixel.hytale.server.core.universe.PlayerRef;
@@ -57,6 +59,8 @@ import com.jonferno.laya.LayaPlugin;
 import com.jonferno.laya.hud.LayaInventoryPage;
 import com.jonferno.laya.world.BlockBreaker;
 import com.jonferno.laya.world.BlockScanner;
+import com.jonferno.laya.world.FarmCrops;
+import com.jonferno.laya.world.FarmProbe;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
@@ -160,6 +164,41 @@ public class NPCController {
     private static final int PROBE_MAX_HITS = 6;
     private static final long PROBE_HIT_INTERVAL_MS = 1500;
     private static final long PROBE_VERIFY_DELAY_MS = 300;  // queued chains tick after the call returns
+
+    // --- Task 3 (farming): the probe_farm S1 gate ---
+    /** Queued chain + a ChangeBlock/PlaceBlock write; 700 ms is generous but the
+     *  probe runs once and a short delay would read a half-applied result. */
+    private static final long FARM_PROBE_VERIFY_MS = 700;
+    /** How far around her the probe looks for soil (it is a probe, not the planner). */
+    private static final int FARM_PROBE_RADIUS = 4;
+    /** Item-id token for seeds (87 items, all Parent: Template_Seeds). */
+    private static final String SEED_ID_TOKEN = "Plant_Seeds";
+
+    // --- Task 4/5 (farming): the planned patch and the executor ---
+    /** Sanity bound on rows, not a feature limit: "plant all 100 seeds" needs 20 rows. */
+    private static final int FARM_MAX_ROWS = 80;
+    /** +/- columns either side of the facing axis (5 wide). */
+    private static final int FARM_GRID_HALF_WIDTH = 2;
+    /** Start two rows out so the patch is never under the player's feet. */
+    private static final int FARM_FIRST_ROW = 2;
+    /**
+     * Backstop only (80 rows x 5). The real limit is how many seeds she can find:
+     * the human asked for "plant all of this type" to use the whole stack (100), so a
+     * fixed 5x5 cap was wrong.
+     */
+    private static final int FARM_MAX_CELLS = FARM_MAX_ROWS * (FARM_GRID_HALF_WIDTH * 2 + 1);
+    /** How far around her to look for a chest when her pack is short of seeds. */
+    private static final int FARM_CHEST_RADIUS = 5;
+    /** Act range from a cell's centre (TASK_ADJACENT is for the role's read point). */
+    private static final double FARM_REACH = 2.6;
+    private static final long FARM_WALK_REPOINT_MS = 600;
+    /** No-progress watchdog: the engine Seek stalls on ledges/crop rows, so teleport beside. */
+    private static final long FARM_UNSTICK_MS = 4_000;
+    private static final int FARM_MAX_UNSTICKS = 2;
+    private static final long FARM_CELL_TIMEOUT_MS = 15_000;
+    /** A queued till chain plus the block write needs a beat before the read-back. */
+    private static final long FARM_STAGE_WAIT_MS = 750;
+    private static final long FARM_BETWEEN_MS = 250;
 
     // --- Task 6: task executor (mine/gather) state machine ---
     // taskPhase: IDLE -> WALKING (task slot written) -> WORKING (adjacent, timed break
@@ -307,6 +346,25 @@ public class NPCController {
     // compareAndSet from the bridge thread prevents two overlapping chains; reset by the
     // chain's terminal callback (block gone / budget exhausted / setup failure).
     private final AtomicBoolean probeChainActive = new AtomicBoolean(false);
+    // Task 3 (farming): one farm probe at a time (separate from the break probe).
+    private final AtomicBoolean farmProbeActive = new AtomicBoolean(false);
+
+    // --- Task 4/5 (farming) state: WORLD-THREAD ONLY mutations ---
+    /** Planned soil cells as {x, y, z}; the plant goes at y+1 above each. */
+    private final java.util.List<int[]> farmQueue = new java.util.ArrayList<>();
+    private int farmIndex = 0;
+    private String farmStage = "TILL";        // "TILL" | "PLANT"
+    private boolean farmFired = false;        // the current stage's action was sent
+    private long farmNextActMs = 0;
+    private long farmLastWalkMs = 0;
+    private long farmCellSinceMs = 0;
+    private String farmSeedHint = "";         // crop word from the bridge, "" = any
+    private String farmSeedKind = "";         // "eternal" | "normal" | "" (resolved at start)
+    private int farmTilled = 0;
+    private int farmPlanted = 0;
+    private int farmSkipped = 0;
+    private double farmLastDist = Double.MAX_VALUE;
+    private int farmUnsticks = 0;
 
     // Task ownership (Task 4): true while Laya stands within TASK_ADJACENT of the live
     // task point. Task 7 consumes it (isTaskAdjacent); world-thread writes, so volatile.
@@ -995,6 +1053,9 @@ public class NPCController {
     /** HUD icon state for the live task: mining / chopping / gathering, or null. */
     public String hudTask() {
         if (taskKind == null || "IDLE".equals(taskPhase)) return null;
+        // Task 6: the Farm icon shows while she is actually working, and drops back to
+        // Follow the moment the task ends (phase IDLE/DONE).
+        if ("farm".equals(taskKind)) return "farming";
         if ("mine".equals(taskKind)) return "mining";
         String label = taskLabel == null ? "" : taskLabel.toLowerCase();
         if (label.contains("wood") || label.contains("log") || label.contains("oak")
@@ -2021,6 +2082,19 @@ public class NPCController {
         taskDigCount = 0;
         taskRadius = 0;
         taskAreaSet = false;
+        // Task 4/5: a cancelled farm task must not leave a queue behind, or the next
+        // stop_task/follow would resume planting where it left off.
+        farmQueue.clear();
+        farmIndex = 0;
+        farmStage = "TILL";
+        farmFired = false;
+        farmNextActMs = 0;
+        farmCellSinceMs = 0;
+        farmLastWalkMs = 0;
+        // Clearing the kind is what stops farmTick from re-entering on an empty queue
+        // after a reset (it posted task_done every tick and the bridge answered each
+        // one - the "done, what's next" spam).
+        taskKind = null;
         stopSwing();                   // Cycle 5: clear the Action slot when the task ends
         plugin.log("Task cleared: " + reason);
     }
@@ -2395,7 +2469,14 @@ public class NPCController {
                         // Wraps Task 4's adjacency result: she reaches the block -> WORKING.
                         // Reach timeout only applies while WALKING (never arrived). DONE
                         // settles TASK_SETTLE_MS so the role's DroppedItem pickup can run.
-                        if ("WALKING".equals(taskPhase)) {
+                        if ("farm".equals(taskKind)
+                            && !"IDLE".equals(taskPhase) && !"DONE".equals(taskPhase)) {
+                            // Task 5: farming owns its own cells - walk, till, plant,
+                            // next cell. Deliberately NOT routed through the
+                            // WALKING/WORKING mine/gather machine, whose WORKING phase
+                            // breaks blocks.
+                            farmTick(now, l);
+                        } else if ("WALKING".equals(taskPhase)) {
                             if (isTaskAdjacent()) {
                                 boolean woodTask = AXE_HINTS.contains(
                                     taskHint == null ? "" : taskHint.toLowerCase());
@@ -3007,6 +3088,10 @@ public class NPCController {
             // Task 2 dev verb: arm the 60 s held-interact window. LOG-ONLY
             // (no npc_event); no task/stance/movement state is touched.
             startUseProbe();
+        } else if ("probe_farm".equalsIgnoreCase(action)) {
+            // Task 3 (farming) dev verb: S1 till+plant probe at the nearest soil block.
+            // LOG-ONLY (no npc_event); no task/stance/movement state is touched.
+            handleProbeFarm();
         } else if ("gift_hand".equalsIgnoreCase(action)) {
             // Task 7 gift: hand what the PLAYER currently holds to Laya.
             // R-T7-1: gift_hand only — no barter UI / InteractionInstruction (deferred T13).
@@ -3103,6 +3188,11 @@ public class NPCController {
             try {
                 if ("identify".equals(t)) {
                     runIdentify();
+                } else if ("farm".equals(t)) {
+                    // Task 4: plan the patch, source the hoe and seeds (pack, then
+                    // chests), then farmTick() walks and plants cell by cell.
+                    // `scope` carries the seed kind for farm tasks (eternal|normal|"").
+                    startFarmTask(requested, h, scope);
                 } else if ("mine".equals(t) || "gather".equals(t)) {
                     // Task 6 refusal gate (world-thread, BEFORE any task-slot write):
                     // mining needs a pickaxe in Laya's inventory; gather uses the
@@ -3120,7 +3210,7 @@ public class NPCController {
                     runScan(t, h);
                 } else {
                     plugin.log("Unknown task: " + t);
-                    postEvent("task_failed", t + ": unknown task (expected identify|mine|gather)");
+                    postEvent("task_failed", t + ": unknown task (expected identify|mine|gather|farm)");
                 }
             } catch (Throwable ex) {
                 plugin.log("Task '" + t + "' failed: " + ex);
@@ -4213,6 +4303,912 @@ public class NPCController {
         } catch (Throwable t) {
             plugin.log("Probe S1 verify failed: " + t);
             probeChainActive.set(false);
+        }
+    }
+
+    // --- Task 4/5 (farming): plan the patch, source the tools, run the cells -----
+    // Mechanism is fixed by the 2026-10-25 probe: TILL is the Hoe_Till interaction
+    // chain (no face), PLANT is a raw BlockOperations.setBlock because the placement
+    // chain despawned her and BlockPlaceUtils.placeBlock refuses an NPC. Every count
+    // reported comes from a read-back, never from the plan.
+
+    /**
+     * "farm" task (world thread). Plans a patch in front of the PLAYER, sources seeds
+     * and a hoe (her pack, then chests within FARM_CHEST_RADIUS), and hands off to
+     * {@link #farmTick} which walks and plants cell by cell.
+     *
+     * @param wanted 0 = every seed she has, else exactly that many cells
+     * @param hint   crop word from the bridge ("carrot"), or "" for whatever she has
+     */
+    private void startFarmTask(int wanted, String hint, String kindRaw) {
+        if (taskSlot < 0) {
+            plugin.log("Farm: refused - task slot unbound");
+            postEvent("task_failed", "I can't work out where to stand for that");
+            return;
+        }
+        Ref<EntityStore> playerEntity = playerRef == null ? null : playerRef.getReference();
+        TransformComponent pt = playerEntity == null ? null
+            : worldStore.getComponent(playerEntity, TransformComponent.getComponentType());
+        if (pt == null) {
+            plugin.log("Farm: refused - no player transform");
+            postEvent("task_failed", "I can't see where you are standing");
+            return;
+        }
+        Vector3d pp = new Vector3d(pt.getPosition());
+        float yaw = pt.getRotation() == null ? 0f : pt.getRotation().yaw();
+        String crop = hint == null ? "" : hint.trim().toLowerCase(java.util.Locale.ROOT);
+        // The bridge forwards the model's literal "null"/"none"/"any" spellings; they are
+        // not crop names (measured: "I don't have any null seeds").
+        if (crop.equals("null") || crop.equals("none") || crop.equals("any")
+            || crop.equals("whatever") || crop.equals("-") || crop.equals("seeds")
+            || crop.equals("seed")) {
+            crop = "";
+        }
+
+        // Eternal and normal seeds plant the same crop but are different items; never
+        // pick one silently when both are in reach (2026-10-25: "plant normal seeds" was
+        // silently planting Eternal ones because the id match was a substring test).
+        String kind = kindRaw == null ? "" : kindRaw.trim().toLowerCase(java.util.Locale.ROOT);
+        if (!kind.equals("eternal") && !kind.equals("normal")) kind = "";
+
+        // 1. Seeds: her pack first, then chests. Never start a task that cannot finish.
+        // "all" means all she can lay hands on: top up from chests even when the pack is
+        // not empty (5 in the pack + 95 in a chest is 100 seeds to plant).
+        if (wanted <= 0) {
+            int fetched = harvestSeedsFromChests(crop, kind, FARM_MAX_CELLS);
+            if (fetched > 0) plugin.log("Farm: fetched " + fetched + " seed(s) from chests");
+        } else {
+            int have = seedCountFor(crop, kind);
+            if (have < wanted) {
+                int fetched = harvestSeedsFromChests(crop, kind, wanted - have);
+                if (fetched > 0) plugin.log("Farm: fetched " + fetched + " seed(s) from chests");
+            }
+        }
+        int seeds = seedCountFor(crop, kind);
+
+        // 2. Ambiguous kind: both normal and eternal are reachable -> ask, do not guess.
+        if (kind.isEmpty()) {
+            int plain = seedCountFor(crop, "normal");
+            int eternal = seedCountFor(crop, "eternal");
+            if (plain > 0 && eternal > 0) {
+                plugin.log("Farm: refused - both seed kinds available (normal=" + plain
+                    + " eternal=" + eternal + ")");
+                postEvent("task_failed", "you've got " + plain + " normal and " + eternal
+                    + " eternal " + (crop.isEmpty() ? "seeds" : crop + " seeds")
+                    + " - which ones should I plant?");
+                return;
+            }
+            kind = eternal > 0 ? "eternal" : (plain > 0 ? "normal" : "");
+            seeds = seedCountFor(crop, kind);
+        }
+        if (seeds == 0) {
+            String what = (kind.isEmpty() ? "" : kind + " ")
+                + (crop.isEmpty() ? "seeds" : crop + " seeds");
+            plugin.log("Farm: refused - no " + what + " in her pack or nearby chests");
+            postEvent("task_failed", "I don't have any " + what);
+            return;
+        }
+
+        // 2. Cells in front of the player: 5 wide, 5 rows out, capped by the seed count.
+        int want = wanted <= 0 ? seeds : Math.min(wanted, seeds);
+        want = Math.min(want, FARM_MAX_CELLS);   // backstop only, not the 5x5 of old
+        java.util.List<int[]> cells = planFarmCells(pp, playerEntity, yaw, want);
+        if (cells.isEmpty()) {
+            plugin.log("Farm: refused - no open tillable ground in front of the player");
+            postEvent("task_failed", "there's no open ground in front of you to dig");
+            return;
+        }
+
+        // 3. A hoe is only needed when some planned cell is not already tilled.
+        boolean needHoe = false;
+        for (int[] c : cells) {
+            if (!FarmProbe.TILLED_ID.equals(FarmProbe.keyAt(world, c[0], c[1], c[2]))) {
+                needHoe = true;
+                break;
+            }
+        }
+        if (needHoe && !hasHoe()) {
+            plugin.log("Farm: refused - no hoe and there is untilled ground");
+            postEvent("task_failed", "I don't have a hoe to till with");
+            return;
+        }
+
+        farmQueue.clear();
+        farmQueue.addAll(cells);
+        farmIndex = 0;
+        farmStage = "TILL";
+        farmFired = false;
+        farmTilled = 0;
+        farmPlanted = 0;
+        farmSkipped = 0;
+        farmSeedHint = crop;
+        farmSeedKind = kind;
+        farmNextActMs = 0;
+        farmCellSinceMs = 0;
+        farmLastWalkMs = 0;
+        taskKind = "farm";
+        taskPhase = "WALKING";
+        taskTargetCount = cells.size();
+        taskDoneCount = 0;
+        taskHint = crop;
+        // handleStopTask reports "<taskDoneCount> <taskLabel> finished"; keep both true.
+        taskLabel = crop.isEmpty() ? "seed" : crop;
+        phaseSinceMs = System.currentTimeMillis();
+        equipFarmItem("Tool_Hoe");
+        int[] first = cells.get(0);
+        plugin.log("Farm: planned " + cells.size() + "/" + want + " cell(s) from the player at "
+            + (int) Math.floor(pp.x) + "," + (int) Math.floor(pp.y) + "," + (int) Math.floor(pp.z)
+            + " first @" + first[0] + "," + first[1] + "," + first[2]
+            + " crop=" + (crop.isEmpty() ? "any" : crop)
+            + " kind=" + (kind.isEmpty() ? "any" : kind) + " seeds=" + seeds
+            + " hoe=" + (bestHoe() == null ? "NONE-USABLE" : "ok")
+            + (bestHoe() == null ? "" : "(" + (int) bestHoe().getDurability() + ")"));
+    }
+
+    /**
+     * Cell columns in front of the player, nearest row first, left to right.
+     * Forward is the player's yaw snapped to one of four cardinals; the chosen axis is
+     * logged so a wrong yaw convention shows up as "it dug behind me" rather than as a
+     * silent mystery.
+     */
+    private java.util.List<int[]> planFarmCells(Vector3d pp, Ref<EntityStore> playerEntity,
+                                              float yaw, int want) {
+        java.util.List<int[]> cells = new java.util.ArrayList<>();
+        int ax = (int) Math.floor(pp.x);
+        int ay = (int) Math.floor(pp.y);
+        int az = (int) Math.floor(pp.z);
+
+        // Forward, with no hand-rolled trigonometry (a sin/cos guess put the patch
+        // behind her on 2026-10-25). Two engine sources, best first:
+        //   1. TargetUtil.getTargetBlock - the block the player is actually looking at;
+        //      the vector to it IS their facing, in whatever convention the game uses.
+        //   2. Rotation3f.transform((0,0,1)) - the engine's own rotation math.
+        double fx = 0, fz = 0;
+        String source = "yaw-fallback";
+        try {
+            Vector3i aimed = TargetUtil.getTargetBlock(playerEntity, 12.0, worldStore);
+            if (aimed != null) {
+                fx = (aimed.x + 0.5) - pp.x;
+                fz = (aimed.z + 0.5) - pp.z;
+                source = "looked-at block @" + aimed.x + "," + aimed.y + "," + aimed.z;
+            }
+        } catch (Throwable ignored) {
+        }
+        if (Math.abs(fx) < 0.5 && Math.abs(fz) < 0.5) {
+            try {
+                TransformComponent pt = playerEntity == null ? null
+                    : worldStore.getComponent(playerEntity, TransformComponent.getComponentType());
+                Vector3d dir = (pt == null || pt.getRotation() == null)
+                    ? new Vector3d(0, 0, 1)
+                    : pt.getRotation().transform(new Vector3d(0, 0, 1), new Vector3d());
+                fx = dir.x;
+                fz = dir.z;
+                source = "rotation.transform(0,0,1)";
+            } catch (Throwable t) {
+                fx = 0;
+                fz = 1;
+            }
+        }
+        int dirX = Math.abs(fx) >= Math.abs(fz) ? (int) Math.signum(fx) : 0;
+        int dirZ = dirX == 0 ? (int) Math.signum(fz) : 0;
+        if (dirX == 0 && dirZ == 0) dirZ = 1;
+        int rightX = -dirZ, rightZ = dirX;
+        plugin.log("Farm: forward=(" + dirX + "," + dirZ + ") right=(" + rightX + "," + rightZ
+            + ") from " + source + " (yaw=" + yaw + ", vec="
+            + String.format(java.util.Locale.ROOT, "%.2f,%.2f", fx, fz) + ")");
+        for (int row = 0; row < FARM_MAX_ROWS && cells.size() < want; row++) {
+            int dist = FARM_FIRST_ROW + row;
+            for (int col = -FARM_GRID_HALF_WIDTH; col <= FARM_GRID_HALF_WIDTH
+                && cells.size() < want; col++) {
+                int cx = ax + dirX * dist + rightX * col;
+                int cz = az + dirZ * dist + rightZ * col;
+                int[] cell = soilCellAt(cx, ay, cz);
+                if (cell != null) cells.add(cell);
+            }
+        }
+        return cells;
+    }
+
+    /**
+     * Soil cell in one column: the highest tillable-or-tilled block within 2 below / 1
+     * above the player's feet, with air above it for the crop.
+     */
+    private int[] soilCellAt(int x, int baseY, int z) {
+        for (int y = baseY + 1; y >= baseY - 2; y--) {
+            String key = FarmProbe.keyAt(world, x, y, z);
+            if (!FarmProbe.isTillable(key) && !FarmProbe.TILLED_ID.equals(key)) continue;
+            if (BlockBreaker.blockId(world, x, y + 1, z) != BlockScanner.EMPTY_ID) continue;
+            return new int[]{x, y, z};
+        }
+        return null;
+    }
+
+    /** World-thread, once per follow tick while taskKind == "farm". */
+    private void farmTick(long now, Vector3d l) {
+        if (farmQueue.isEmpty()) return;          // nothing planned: never report twice
+        if (farmIndex >= farmQueue.size()) {
+            finishFarm();
+            return;
+        }
+        int[] cell = farmQueue.get(farmIndex);
+        int cx = cell[0], cy = cell[1], cz = cell[2];
+
+        // 1. Walk to the cell's column (same task slot the mine/gather path uses).
+        double d = Math.hypot(l.x - (cx + 0.5), l.z - (cz + 0.5));
+        if (d > FARM_REACH) {
+            if (farmCellSinceMs == 0) {
+                farmCellSinceMs = now;
+                farmLastDist = d;
+            }
+            boolean noProgress = Math.abs(farmLastDist - d) < 0.05;
+            farmLastDist = d;
+            if (now - farmLastWalkMs > FARM_WALK_REPOINT_MS && taskSlot >= 0) {
+                if (writeSlot(taskSlot, new Vector3d(cx + 0.5, cy + 1.0, cz + 0.5))) {
+                    refreshPath();
+                    lastTaskWriteMs = now;
+                }
+                farmLastWalkMs = now;
+            }
+            // The engine Seek is a straight-line mover: a ledge, a fence or the crop rows
+            // themselves leave her walking on the spot until the cell times out (measured
+            // 2026-10-25: 90 s frozen at one position, every cell skipped). Same remedy the
+            // mine/gather watchdog uses - put her beside the cell, then re-check adjacency.
+            if (noProgress && now - farmCellSinceMs > FARM_UNSTICK_MS
+                && farmUnsticks < FARM_MAX_UNSTICKS) {
+                double ox = l.x - (cx + 0.5), oz = l.z - (cz + 0.5);
+                double len = Math.hypot(ox, oz);
+                if (len < 1e-3) { ox = 1.0; oz = 0.0; len = 1.0; }
+                double sx = cx + 0.5 + ox / len * 1.0;
+                double sz = cz + 0.5 + oz / len * 1.0;
+                try {
+                    TransformComponent layaT = worldStore.getComponent(layaRef,
+                        TransformComponent.getComponentType());
+                    if (layaT != null) {
+                        layaT.teleportPosition(new Vector3d(sx, cy + 1.0, sz));
+                        refreshPath();
+                        farmUnsticks++;
+                        plugin.log("Farm: unstick " + farmUnsticks + "/" + FARM_MAX_UNSTICKS
+                            + " - teleported beside cell @" + cx + "," + cy + "," + cz);
+                    }
+                } catch (Throwable t) {
+                    plugin.log("Farm: unstick failed: " + t);
+                }
+                farmCellSinceMs = now;
+                return;
+            }
+            if (now - farmCellSinceMs > FARM_CELL_TIMEOUT_MS) {
+                farmSkipped++;
+                plugin.log("Farm: skipping cell @" + cx + "," + cy + "," + cz + " - couldn't reach it");
+                nextFarmCell(now);
+            }
+            return;
+        }
+
+        if (now < farmNextActMs) return;
+
+        if ("TILL".equals(farmStage)) {
+            String key = FarmProbe.keyAt(world, cx, cy, cz);
+            if (FarmProbe.TILLED_ID.equals(key)) {
+                farmStage = "PLANT";   // already tilled: plant straight into it
+                farmFired = false;
+                return;
+            }
+            if (!farmFired) {
+                // Refuse out loud on a broken hoe instead of swinging it 90 more times.
+                if (bestHoe() == null) {
+                    // Borrow one before giving up: she cannot craft, and a broken hoe is
+                    // the normal end of a 100-durability tool.
+                    int borrowed = harvestHoeFromChests();
+                    if (borrowed > 0 && equipBestHoe()) {
+                        plugin.log("Farm: borrowed a fresh hoe from a nearby chest");
+                    } else {
+                        farmSkipped += farmQueue.size() - farmIndex;
+                        plugin.log("Farm: aborting - no usable hoe (broken, and no spare in a chest)");
+                        finishFarmHoeBroken();
+                        return;
+                    }
+                }
+                equipBestHoe();
+                boolean ok = FarmProbe.act(world, worldStore, layaRef, cx, cy, cz,
+                    FarmProbe.TILL_INTERACTION, null);
+                farmFired = true;
+                farmNextActMs = now + FARM_STAGE_WAIT_MS;
+                ItemStack held = heldHoe();
+                plugin.log("Farm: till @" + cx + "," + cy + "," + cz + " queued=" + ok
+                    + " hoe=" + (held == null ? "NONE" : (int) held.getDurability() + " left"));
+                return;
+            }
+            if (FarmProbe.TILLED_ID.equals(FarmProbe.keyAt(world, cx, cy, cz))) {
+                farmTilled++;
+                farmStage = "PLANT";
+                farmFired = false;
+                farmNextActMs = now + FARM_BETWEEN_MS;
+                plugin.log("Farm: tilled @" + cx + "," + cy + "," + cz);
+            } else {
+                farmSkipped++;
+                plugin.log("Farm: till FAILED @" + cx + "," + cy + "," + cz + " - skipping cell");
+                nextFarmCell(now);
+            }
+            return;
+        }
+
+        // PLANT: raw write (S3) + consume one seed ourselves, then verify by read-back.
+        String seed = equipFarmSeed(farmSeedHint, farmSeedKind);
+        String cropBlock = FarmCrops.blockFor(seed);
+        if (cropBlock == null) {
+            farmSkipped++;
+            plugin.log("Farm: no plantable seed left for '" + farmSeedHint + "' - skipping cell");
+            nextFarmCell(now);
+            return;
+        }
+        String report = FarmProbe.plantRaw(world, cx, cy + 1, cz, cropBlock);
+        boolean wrote = report != null && report.contains("block=" + cropBlock);
+        if (wrote) {
+            try {
+                Inventory inv = npcEntity.getInventory();
+                ItemContainer hotbar = inv.getHotbar();
+                byte slot = inv.getActiveHotbarSlot();
+                hotbar.removeItemStackFromSlot(slot, 1);
+                saveInventory();
+            } catch (Throwable t) {
+                plugin.log("Farm: seed consume failed: " + t);
+            }
+            farmPlanted++;
+            plugin.log("Farm: planted " + cropBlock + " @" + cx + "," + (cy + 1) + "," + cz
+                + " (" + report + ")");
+        } else {
+            farmSkipped++;
+            plugin.log("Farm: plant FAILED @" + cx + "," + (cy + 1) + "," + cz + " - " + report);
+        }
+        nextFarmCell(now);
+    }
+
+    private void nextFarmCell(long now) {
+        farmIndex++;
+        taskDoneCount = farmPlanted;   // a stop mid-run must report what actually went in
+        farmStage = "TILL";
+        farmFired = false;
+        farmCellSinceMs = 0;
+        farmLastWalkMs = 0;
+        farmLastDist = Double.MAX_VALUE;
+        farmUnsticks = 0;
+        farmNextActMs = now + FARM_BETWEEN_MS;
+        if (farmIndex >= farmQueue.size()) finishFarm();
+    }
+
+    /** A broken hoe ends the job honestly: report what did get planted, then stop. */
+    private void finishFarmHoeBroken() {
+        final int planted = farmPlanted;
+        final int tilled = farmTilled;
+        resetTaskState("farm aborted: hoe broken");
+        postEvent("task_failed", planted > 0
+            ? "my hoe broke after " + planted + " seed" + (planted == 1 ? "" : "s")
+                + " - I need a new one to keep going"
+            : "my hoe is worn out - I need a new one before I can till");
+    }
+
+    /** Report verified counts through the normal event channel, then release the task. */
+    private void finishFarm() {
+        final int planted = farmPlanted;
+        final int tilled = farmTilled;
+        final int skipped = farmSkipped;
+        final String crop = farmSeedHint == null ? "" : farmSeedHint;
+        resetTaskState("farm done");
+        if (planted == 0) {
+            postEvent("task_failed", "couldn't plant anything (" + skipped + " cell(s) failed)");
+            return;
+        }
+        String kind = farmSeedKind == null ? "" : farmSeedKind;
+        StringBuilder sb = new StringBuilder("planted ").append(planted).append(' ');
+        if (!kind.isEmpty()) sb.append(kind).append(' ');
+        if (!crop.isEmpty()) sb.append(crop).append(' ');
+        sb.append(planted == 1 ? "seed" : "seeds");
+        if (tilled > 0) sb.append(", tilled ").append(tilled)
+            .append(tilled == 1 ? " plot" : " plots");
+        if (skipped > 0) sb.append(", ").append(skipped).append(" skipped");
+        plugin.log("Farm: done planted=" + planted + " tilled=" + tilled + " skipped=" + skipped);
+        postEvent("task_done", sb.toString());
+    }
+
+    /** Seeds of one crop and kind ("" = any) across her containers. */
+    private int seedCountFor(String crop, String kind) {
+        try {
+            if (npcEntity == null) return 0;
+            Inventory inv = npcEntity.getInventory();
+            if (inv == null) return 0;
+            ItemContainer[] all = {inv.getHotbar(), inv.getStorage(), inv.getTools(),
+                inv.getBackpack(), inv.getUtility()};
+            int total = 0;
+            for (ItemContainer c : all) {
+                if (c == null) continue;
+                for (short s = 0; s < c.getCapacity(); s++) {
+                    ItemStack st = c.getItemStack(s);
+                    if (!isSeedFor(st, crop, kind)) continue;
+                    total += st.getQuantity();
+                }
+            }
+            return total;
+        } catch (Throwable t) {
+            return 0;
+        }
+    }
+
+    /**
+     * True when the stack is a seed of the named crop ("" = any crop) and of the requested
+     * kind ("" = either, "eternal" = only *_Eternal, "normal" = only the plain seed).
+     */
+    private static boolean isSeedFor(ItemStack st, String crop, String kind) {
+        if (st == null || st.getItemId() == null) return false;
+        String id = st.getItemId();
+        if (!id.startsWith(SEED_ID_TOKEN)) return false;
+        boolean eternal = id.endsWith("_Eternal");
+        if ("eternal".equals(kind) && !eternal) return false;
+        if ("normal".equals(kind) && eternal) return false;
+        if (crop == null || crop.isEmpty()) return true;
+        return id.toLowerCase(java.util.Locale.ROOT)
+            .contains(crop.toLowerCase(java.util.Locale.ROOT));
+    }
+
+    /** Put a seed of the named crop/kind (either "" = any) in the active slot; id or null. */
+    private String equipFarmSeed(String crop, String kind) {
+        try {
+            if (npcEntity == null || layaRef == null || worldStore == null) return null;
+            Inventory inv = npcEntity.getInventory();
+            if (inv == null) return null;
+            ItemContainer hotbar = inv.getHotbar();
+            if (hotbar == null) return null;
+            for (short s = 0; s < hotbar.getCapacity(); s++) {
+                ItemStack st = hotbar.getItemStack(s);
+                if (!isSeedFor(st, crop, kind)) continue;
+                inv.setActiveHotbarSlot(layaRef, (byte) s, worldStore);
+                return st.getItemId();
+            }
+            ItemContainer[] others = {inv.getStorage(), inv.getTools(), inv.getBackpack(),
+                inv.getUtility()};
+            for (ItemContainer sec : others) {
+                if (sec == null) continue;
+                for (short s = 0; s < sec.getCapacity(); s++) {
+                    ItemStack st = sec.getItemStack(s);
+                    if (!isSeedFor(st, crop, kind)) continue;
+                    int empty = firstEmptySlot(hotbar);
+                    if (empty < 0) empty = inv.getActiveHotbarSlot();
+                    if (empty < 0) return null;
+                    ItemStack previous = hotbar.getItemStack((short) empty);
+                    hotbar.setItemStackForSlot((short) empty, st);
+                    sec.setItemStackForSlot(s, previous);   // swap, never drop
+                    inv.setActiveHotbarSlot(layaRef, (byte) empty, worldStore);
+                    saveInventory();
+                    return st.getItemId();
+                }
+            }
+        } catch (Throwable t) {
+            plugin.log("Farm: equip seed failed: " + t);
+        }
+        return null;
+    }
+
+    private boolean hasHoe() {
+        return hasItemToken("Tool_Hoe");
+    }
+
+    /**
+     * Best usable hoe in her containers (highest remaining durability > 0), or null.
+     * {@code Hoe_Till} carries {@code RequireNotBroken: true} and spends one durability
+     * per swing, so a worn-out hoe makes every till silently do nothing (measured
+     * 2026-10-25: 90+ tills on a 100-durability hoe, then every cell "till FAILED").
+     */
+    private ItemStack bestHoe() {
+        ItemStack best = null;
+        try {
+            if (npcEntity == null) return null;
+            Inventory inv = npcEntity.getInventory();
+            if (inv == null) return null;
+            ItemContainer[] all = {inv.getHotbar(), inv.getStorage(), inv.getTools(),
+                inv.getBackpack(), inv.getUtility()};
+            for (ItemContainer c : all) {
+                if (c == null) continue;
+                for (short s = 0; s < c.getCapacity(); s++) {
+                    ItemStack st = c.getItemStack(s);
+                    if (st == null || st.getItemId() == null) continue;
+                    if (!st.getItemId().startsWith("Tool_Hoe")) continue;
+                    if (st.getDurability() <= 0) continue;
+                    if (best == null || st.getDurability() > best.getDurability()) best = st;
+                }
+            }
+        } catch (Throwable t) {
+            plugin.log("Farm: hoe scan failed: " + t);
+        }
+        return best;
+    }
+
+    /**
+     * Hold the hoe with the most life left. {@code equipFarmItem("Tool_Hoe")} takes the
+     * FIRST id match, which can be a broken one — the exact failure that made every till
+     * a silent no-op.
+     */
+    private boolean equipBestHoe() {
+        try {
+            if (npcEntity == null || layaRef == null || worldStore == null) return false;
+            Inventory inv = npcEntity.getInventory();
+            if (inv == null) return false;
+            ItemContainer hotbar = inv.getHotbar();
+            if (hotbar == null) return false;
+            int bestSlot = -1;
+            ItemContainer bestSec = null;
+            double bestDur = -1;
+            ItemContainer[] all = {hotbar, inv.getStorage(), inv.getTools(),
+                inv.getBackpack(), inv.getUtility()};
+            for (ItemContainer c : all) {
+                if (c == null) continue;
+                for (short s = 0; s < c.getCapacity(); s++) {
+                    ItemStack st = c.getItemStack(s);
+                    if (st == null || st.getItemId() == null) continue;
+                    if (!st.getItemId().startsWith("Tool_Hoe")) continue;
+                    if (st.getDurability() <= 0) continue;
+                    if (st.getDurability() > bestDur) {
+                        bestDur = st.getDurability();
+                        bestSlot = s;
+                        bestSec = c;
+                    }
+                }
+            }
+            if (bestSec == null) return false;
+            if (bestSec == hotbar) {
+                inv.setActiveHotbarSlot(layaRef, (byte) bestSlot, worldStore);
+                return true;
+            }
+            int empty = firstEmptySlot(hotbar);
+            if (empty < 0) empty = inv.getActiveHotbarSlot();
+            if (empty < 0) return false;
+            ItemStack st = bestSec.getItemStack((short) bestSlot);
+            ItemStack previous = hotbar.getItemStack((short) empty);
+            hotbar.setItemStackForSlot((short) empty, st);
+            bestSec.setItemStackForSlot((short) bestSlot, previous);
+            inv.setActiveHotbarSlot(layaRef, (byte) empty, worldStore);
+            saveInventory();
+            plugin.log("Farm: swapped fresh hoe " + st.getItemId() + " ("
+                + (int) st.getDurability() + " left) into hotbar " + empty);
+            return true;
+        } catch (Throwable t) {
+            plugin.log("Farm: equip hoe failed: " + t);
+            return false;
+        }
+    }
+
+    /** The hoe currently in her active hotbar slot, or null. */
+    private ItemStack heldHoe() {
+        try {
+            if (npcEntity == null) return null;
+            Inventory inv = npcEntity.getInventory();
+            if (inv == null || inv.getHotbar() == null) return null;
+            ItemStack st = inv.getHotbar().getItemStack((short) inv.getActiveHotbarSlot());
+            return (st != null && st.getItemId() != null
+                && st.getItemId().startsWith("Tool_Hoe")) ? st : null;
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    /**
+     * Task 4 sourcing: move seeds of the named crop (or any) out of chests within
+     * FARM_CHEST_RADIUS into her storage. Returns how many items were moved. Only called
+     * when the pack is short, because it reads a cube of block entities.
+     */
+    private int harvestSeedsFromChests(String crop, String kind, int need) {
+        return harvestFromChests(st -> isSeedFor(st, crop, kind), need);
+    }
+
+    /** Grab a spare hoe with life left out of a nearby chest (she cannot craft one). */
+    private int harvestHoeFromChests() {
+        return harvestFromChests(st -> st != null && st.getItemId() != null
+            && st.getItemId().startsWith("Tool_Hoe") && st.getDurability() > 0, 1);
+    }
+
+    private int harvestFromChests(java.util.function.Predicate<ItemStack> match, int need) {
+        try {
+            if (npcEntity == null || layaRef == null || worldStore == null) return 0;
+            Inventory inv = npcEntity.getInventory();
+            if (inv == null) return 0;
+            ItemContainer dest = inv.getStorage();
+            if (dest == null) return 0;
+            TransformComponent t = worldStore.getComponent(layaRef,
+                TransformComponent.getComponentType());
+            if (t == null) return 0;
+            int ox = (int) Math.floor(t.getPosition().x);
+            int oy = (int) Math.floor(t.getPosition().y);
+            int oz = (int) Math.floor(t.getPosition().z);
+            int moved = 0;
+            for (int dx = -FARM_CHEST_RADIUS; dx <= FARM_CHEST_RADIUS && moved < need; dx++) {
+                for (int dy = -2; dy <= 2 && moved < need; dy++) {
+                    for (int dz = -FARM_CHEST_RADIUS; dz <= FARM_CHEST_RADIUS && moved < need; dz++) {
+                        int x = ox + dx, y = oy + dy, z = oz + dz;
+                        ItemContainerBlock chest;
+                        try {
+                            chest = BlockModule.getComponent(
+                                BlockModule.get().getItemContainerBlockComponentType(),
+                                world, x, y, z);
+                        } catch (Throwable ignored) {
+                            continue;
+                        }
+                        if (chest == null) continue;
+                        ItemContainer cc = chest.getItemContainer();
+                        if (cc == null) continue;
+                        for (short s = 0; s < cc.getCapacity() && moved < need; s++) {
+                            ItemStack st = cc.getItemStack(s);
+                            if (!match.test(st)) continue;
+                            int empty = firstEmptySlot(dest);
+                            if (empty < 0) return moved;
+                            dest.setItemStackForSlot((short) empty, st);
+                            cc.setItemStackForSlot(s, null);
+                            moved += st.getQuantity();
+                            plugin.log("Farm: took " + st.getItemId() + " x" + st.getQuantity()
+                                + " from a chest at " + x + "," + y + "," + z);
+                        }
+                    }
+                }
+            }
+            if (moved > 0) saveInventory();
+            return moved;
+        } catch (Throwable t) {
+            plugin.log("Farm: chest sweep failed: " + t);
+            return 0;
+        }
+    }
+
+    // --- Task 3 (farming): probe_farm, the S1 gate ----------------------------
+    // The question this answers: can an NPC chain TILL and PLANT at all, and does
+    // Seed_Condition's face-"Up" BlockCondition accept a face we supply ourselves?
+    // LOG-ONLY: no npc_event, no task/stance/movement state (same contract as
+    // handleProbeBreak). Kept committed as evidence for the farming spec.
+
+    /** "probe_farm" (bridge thread): arm the probe and hop to the world thread. */
+    private void handleProbeFarm() {
+        if (world == null || worldStore == null || layaRef == null) {
+            plugin.log("Laya probe_farm ignored - not ready (world=" + (world != null)
+                + ", store=" + (worldStore != null) + ", laya=" + (layaRef != null) + ")");
+            return;
+        }
+        if (!farmProbeActive.compareAndSet(false, true)) {
+            plugin.log("Laya probe_farm ignored - a farm probe is already pending");
+            return;
+        }
+        world.execute(this::startFarmProbe);
+    }
+
+    /** World-thread: pick a soil block near her, log it, and fire the till chain. */
+    private void startFarmProbe() {
+        if (!farmProbeActive.get()) return;
+        try {
+            TransformComponent t = worldStore.getComponent(layaRef, TransformComponent.getComponentType());
+            if (t == null) {
+                plugin.log("Laya probe_farm: Laya transform missing");
+                farmProbeActive.set(false);
+                return;
+            }
+            Vector3d p = new Vector3d(t.getPosition());
+            int[] cell = findFarmProbeCell((int) Math.floor(p.x), (int) Math.floor(p.y),
+                (int) Math.floor(p.z));
+            if (cell == null) {
+                plugin.log("Laya probe_farm: no tillable soil within " + FARM_PROBE_RADIUS
+                    + " blocks of her (needs one of the 16 Hoe_Till soils with air above)");
+                farmProbeActive.set(false);
+                return;
+            }
+            int x = cell[0], y = cell[1], z = cell[2];
+            plugin.log("Laya probe_farm: target @" + x + "," + y + "," + z
+                + " block=" + FarmProbe.keyAt(world, x, y, z)
+                + " above=" + FarmProbe.keyAt(world, x, y + 1, z));
+            String hoe = equipFarmItem("Tool_Hoe");
+            plugin.log("Laya probe_farm: hoe=" + (hoe == null ? "NONE" : hoe)
+                + " (Hoe_Till's durability step wants it in hand)");
+            // No face for tilling: ChangeBlock only needs the target block, and a
+            // face on a chain that does not use one is extra risk, not fidelity.
+            boolean fired = FarmProbe.act(world, worldStore, layaRef, x, y, z,
+                FarmProbe.TILL_INTERACTION, null);
+            plugin.log("Laya probe_farm: till @" + x + "," + y + "," + z
+                + " interaction=" + FarmProbe.TILL_INTERACTION + " queued=" + fired);
+            world.scheduleAfter(() -> farmProbeTillVerify(x, y, z),
+                FARM_PROBE_VERIFY_MS, TimeUnit.MILLISECONDS);
+        } catch (Throwable t) {
+            plugin.log("Laya probe_farm failed: " + t);
+            farmProbeActive.set(false);
+        }
+    }
+
+    /** Nearest cell within FARM_PROBE_RADIUS that is a tillable soil with air above. */
+    private int[] findFarmProbeCell(int ox, int oy, int oz) {
+        int[] best = null;
+        double bestD = Double.MAX_VALUE;
+        for (int dy = -2; dy <= 2; dy++) {
+            for (int dx = -FARM_PROBE_RADIUS; dx <= FARM_PROBE_RADIUS; dx++) {
+                for (int dz = -FARM_PROBE_RADIUS; dz <= FARM_PROBE_RADIUS; dz++) {
+                    int x = ox + dx, y = oy + dy, z = oz + dz;
+                    if (!FarmProbe.isTillable(FarmProbe.keyAt(world, x, y, z))) continue;
+                    if (BlockBreaker.blockId(world, x, y + 1, z) != BlockScanner.EMPTY_ID) continue;
+                    double d = (double) dx * dx + (double) dz * dz + 4.0 * dy * dy;
+                    if (d < bestD) {
+                        bestD = d;
+                        best = new int[]{x, y, z};
+                    }
+                }
+            }
+        }
+        return best;
+    }
+
+    /** World-thread (scheduleAfter): log the till result, then plant if it took. */
+    private void farmProbeTillVerify(int x, int y, int z) {
+        if (!farmProbeActive.get()) return;
+        try {
+            String after = FarmProbe.keyAt(world, x, y, z);
+            boolean tilled = FarmProbe.TILLED_ID.equals(after);
+            plugin.log("Laya probe_farm: till @" + x + "," + y + "," + z
+                + " after=" + after + " -> " + (tilled ? "OK" : "FAIL"));
+            if (!tilled) {
+                plugin.log("Laya probe_farm: S1 TILL FAIL - take the S2/S3 ladder in the spec");
+                farmProbeActive.set(false);
+                return;
+            }
+            final int seedsBefore = seedCount();
+            plugin.log("Laya probe_farm: seeds in pack: " + seedSummary());
+            final String seed = equipFarmItem(SEED_ID_TOKEN);
+            if (seed == null) {
+                plugin.log("Laya probe_farm: no Plant_Seeds_* in her pack - plant stage skipped");
+                farmProbeActive.set(false);
+                return;
+            }
+            final String cropBlock = FarmCrops.blockFor(seed);
+            plugin.log("Laya probe_farm: seed in hand=" + seed
+                + " cropBlock=" + (cropBlock == null ? "NONE (not soil-plantable)" : cropBlock)
+                + " seeds before=" + seedsBefore);
+            // Plant rung ladder, both measured in game on 2026-10-25:
+            //   S1 chain (Seed_Condition -> Seed_Place): DESPAWNED her, nothing placed.
+            //   S2 BlockPlaceUtils.placeBlock: returned false silently, nothing placed.
+            // So: S3, the same raw write the engine's own NPC ActionPlaceBlock performs.
+            final Inventory inv = npcEntity == null ? null : npcEntity.getInventory();
+            final ItemContainer hotbar = inv == null ? null : inv.getHotbar();
+            final byte slot = inv == null ? (byte) -1 : inv.getActiveHotbarSlot();
+            final ItemStack held = (hotbar == null || slot < 0) ? null : hotbar.getItemStack(slot);
+            plugin.log("Laya probe_farm: held slot=" + slot + " stack="
+                + (held == null ? "null" : held.getItemId()));
+            final String s3 = cropBlock == null ? null
+                : FarmProbe.plantRaw(world, x, y + 1, z, cropBlock);
+            boolean wrote = s3 != null && s3.contains("block=" + cropBlock);
+            plugin.log("Laya probe_farm: plant @" + x + "," + (y + 1) + "," + z
+                + " via raw write wrote=" + wrote + " seed=" + seed);
+            if (wrote && hotbar != null && slot >= 0) {
+                // S3 does not consume the item, so consume it here: an honest inventory.
+                hotbar.removeItemStackFromSlot(slot, 1);
+                saveInventory();
+                plugin.log("Laya probe_farm: consumed 1 " + seed + " from hotbar " + slot
+                    + " (raw write does not consume)");
+            }
+            world.scheduleAfter(() -> farmProbePlantVerify(x, y, z, seed, seedsBefore),
+                FARM_PROBE_VERIFY_MS, TimeUnit.MILLISECONDS);
+        } catch (Throwable t) {
+            plugin.log("Laya probe_farm till verify failed: " + t);
+            farmProbeActive.set(false);
+        }
+    }
+
+    /** World-thread (scheduleAfter): log the plant result and close the probe. */
+    private void farmProbePlantVerify(int x, int y, int z, String seedId, int seedsBefore) {
+        if (!farmProbeActive.get()) return;
+        try {
+            // BlockScanner.assetId() returns the literal string "Empty" for air, so a
+            // null/empty check on it is a false positive. Compare raw block ids.
+            int afterId = BlockBreaker.blockId(world, x, y + 1, z);
+            String after = afterId == BlockScanner.EMPTY_ID ? "air" : BlockScanner.assetId(afterId);
+            // If the arg order were the other way round the crop would land at y+2, so
+            // read both and name whichever got it. Evidence, not a guess.
+            int above2 = BlockBreaker.blockId(world, x, y + 2, z);
+            String after2 = above2 == BlockScanner.EMPTY_ID ? "air" : BlockScanner.assetId(above2);
+            int seedsAfter = seedCount();
+            boolean placed = afterId != BlockScanner.EMPTY_ID || above2 != BlockScanner.EMPTY_ID;
+            plugin.log("Laya probe_farm: plant @" + x + "," + (y + 1) + "," + z
+                + " after=" + after + " y+2=" + after2 + " seed=" + seedId
+                + " seeds before=" + seedsBefore + " after=" + seedsAfter
+                + " -> " + (placed ? "OK" : "FAIL"));
+            plugin.log("Laya probe_farm: RESULT " + (placed
+                ? "PASS (till=Hoe_Till chain, plant=BlockOperations.setBlock raw)"
+                : "FAIL - see the ladder notes in the farming spec"));
+        } catch (Throwable t) {
+            plugin.log("Laya probe_farm plant verify failed: " + t);
+        } finally {
+            farmProbeActive.set(false);
+        }
+    }
+
+    /**
+     * World-thread: put the first item whose id starts with {@code prefix} into the
+     * active hotbar slot (swapping, never dropping) and return its id, or null when
+     * she has none. Mirrors equipTaskTool's swap so no item is ever destroyed.
+     */
+    private String equipFarmItem(String prefix) {
+        try {
+            if (npcEntity == null || layaRef == null || worldStore == null) return null;
+            Inventory inv = npcEntity.getInventory();
+            if (inv == null) return null;
+            ItemContainer hotbar = inv.getHotbar();
+            if (hotbar == null) return null;
+            for (short s = 0; s < hotbar.getCapacity(); s++) {
+                ItemStack st = hotbar.getItemStack(s);
+                if (st != null && st.getItemId() != null && st.getItemId().startsWith(prefix)) {
+                    inv.setActiveHotbarSlot(layaRef, (byte) s, worldStore);
+                    return st.getItemId();
+                }
+            }
+            ItemContainer[] others = {inv.getStorage(), inv.getTools(), inv.getBackpack(), inv.getUtility()};
+            for (ItemContainer sec : others) {
+                if (sec == null) continue;
+                for (short s = 0; s < sec.getCapacity(); s++) {
+                    ItemStack st = sec.getItemStack(s);
+                    if (st == null || st.getItemId() == null || !st.getItemId().startsWith(prefix)) {
+                        continue;
+                    }
+                    int empty = firstEmptySlot(hotbar);
+                    if (empty < 0) empty = inv.getActiveHotbarSlot();
+                    if (empty < 0) return null;
+                    ItemStack previous = hotbar.getItemStack((short) empty);
+                    hotbar.setItemStackForSlot((short) empty, st);
+                    sec.setItemStackForSlot(s, previous);   // swap, never drop
+                    inv.setActiveHotbarSlot(layaRef, (byte) empty, worldStore);
+                    plugin.log("Laya farm: swapped " + st.getItemId() + " into hotbar " + empty);
+                    saveInventory();
+                    return st.getItemId();
+                }
+            }
+        } catch (Throwable t) {
+            plugin.log("Laya farm: equip '" + prefix + "' failed: " + t);
+        }
+        return null;
+    }
+
+    /** World-thread: "Plant_Seeds_Wheat x12, Plant_Seeds_Carrot x3" for the probe log. */
+    private String seedSummary() {
+        try {
+            if (npcEntity == null) return "(no npc)";
+            Inventory inv = npcEntity.getInventory();
+            if (inv == null) return "(no inventory)";
+            ItemContainer[] all = {inv.getHotbar(), inv.getStorage(), inv.getTools(),
+                inv.getBackpack(), inv.getUtility()};
+            StringBuilder sb = new StringBuilder();
+            for (ItemContainer c : all) {
+                if (c == null) continue;
+                for (short s = 0; s < c.getCapacity(); s++) {
+                    ItemStack st = c.getItemStack(s);
+                    if (st == null || st.getItemId() == null) continue;
+                    if (!st.getItemId().startsWith(SEED_ID_TOKEN)) continue;
+                    if (sb.length() > 0) sb.append(", ");
+                    sb.append(st.getItemId()).append(" x").append(st.getQuantity());
+                }
+            }
+            return sb.length() == 0 ? "none" : sb.toString();
+        } catch (Throwable t) {
+            return "(error " + t.getClass().getSimpleName() + ")";
+        }
+    }
+
+    /** World-thread: total Plant_Seeds_* items across her containers. */
+    private int seedCount() {
+        try {
+            if (npcEntity == null) return 0;
+            Inventory inv = npcEntity.getInventory();
+            if (inv == null) return 0;
+            ItemContainer[] all = {inv.getHotbar(), inv.getStorage(), inv.getTools(),
+                inv.getBackpack(), inv.getUtility()};
+            int total = 0;
+            for (ItemContainer c : all) {
+                if (c == null) continue;
+                for (short s = 0; s < c.getCapacity(); s++) {
+                    ItemStack st = c.getItemStack(s);
+                    if (st == null || st.getItemId() == null) continue;
+                    if (st.getItemId().startsWith(SEED_ID_TOKEN)) total += st.getQuantity();
+                }
+            }
+            return total;
+        } catch (Throwable t) {
+            return 0;
         }
     }
 

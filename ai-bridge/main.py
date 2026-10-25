@@ -33,6 +33,8 @@ from pydantic import BaseModel
 
 from stance import stance_intent, stance_ack, STANCE_ACKS
 from gearcheck import asks_about_gear
+from farming import (detect_farm, farm_ack, seed_kind, is_kind_answer,
+                     count_from_message)
 from idlelogic import should_fire, idle_gap_ms
 import memreset
 from personalities import PERSONALITIES, personality_layer, DEFAULT_PERSONALITY
@@ -433,6 +435,12 @@ def build_persona() -> str:
 
 
 PERSONA = build_persona()
+
+# Farm handoff: the plugin refuses a farm task when both seed kinds are in reach and
+# asks "which ones should I plant?". We remember what was asked, so a bare answer
+# ("normal", "the eternal ones") can rebuild the same task with a kind attached.
+_LAST_FARM = None      # {"hint": str, "count": int} of the last farm intent sent
+_PENDING_FARM = None   # set while her "which kind?" question is unanswered
 
 # ---------------------------------------------------------------------------
 # Persistent memory + Hytale game knowledge
@@ -3108,31 +3116,85 @@ async def run_chat(player: str, message: str, state: dict, with_audio: bool,
         # forces the task even when the model refuses from stale memory.
         # Combat Task 1: a fast command already decided the action - skip the whole
         # leg (stop-task ordering for non-fast messages is unchanged below).
+        det_task = None
+        det_farm = False
+        farm_count = 0
+        farm_kind = ""
         if not fast and wants_stop_task(message):
             log("Guard: stop-task cue -> action=stop_task")
             action = "stop_task"
             task = ""
             target_hint = ""
         else:
-            det_task, det_hint = detect_task(message)
-            if det_task:
-                # The raw text is authoritative: a stale-memory refusal or a
-                # wrong verb (gather for ore) can't suppress the real request.
-                if task != det_task or target_hint != det_hint:
-                    log(f"Guard: deterministic task overrides model -> {det_task} hint={det_hint}")
-                task, target_hint = det_task, det_hint or ""
-            elif det_task and not target_hint:
-                target_hint = det_hint or ""
+            # Farming is checked FIRST: "plant"/"hoe" must never fall through to
+            # the mine/gather grammar, which would read "plant some seeds" as a
+            # gather job for the resource "seeds".
+            global _PENDING_FARM
+            is_farm, farm_count, farm_hint = detect_farm(message)
+            # A bare answer to her own "which ones should I plant?" has no farm verb, so
+            # rebuild the pending task and let the named kind settle it (measured
+            # 2026-10-25: she asked three times because the answer carried no intent).
+            if not is_farm and _PENDING_FARM and is_kind_answer(message):
+                task = "farm"
+                target_hint = _PENDING_FARM.get("hint", "") or ""
+                farm_count = int(_PENDING_FARM.get("count", 0) or 0)
+                is_farm = True
+                det_farm = True
+                log(f"Farm: kind answer '{message.strip()[:40]}' resolves the pending "
+                    f"request (hint={target_hint or 'any'} kind={seed_kind(message)})")
+                _PENDING_FARM = None
+            det_farm = det_farm or is_farm
+            farm_kind = seed_kind(message) if is_farm else ""
+            if is_farm:
+                if task != "farm" or target_hint != farm_hint:
+                    log(f"Guard: deterministic farm intent -> count={farm_count or 'all'}"
+                        f" hint={farm_hint or '?'}")
+                task = "farm"
+                if farm_hint:
+                    target_hint = farm_hint        # never wipe a pending answer's crop
+            else:
+                det_task, det_hint = detect_task(message)
+                if det_task:
+                    # The raw text is authoritative: a stale-memory refusal or a
+                    # wrong verb (gather for ore) can't suppress the real request.
+                    if task != det_task or target_hint != det_hint:
+                        log(f"Guard: deterministic task overrides model -> {det_task} hint={det_hint}")
+                    task, target_hint = det_task, det_hint or ""
+                elif det_task and not target_hint:
+                    target_hint = det_hint or ""
         if (task in ("mine", "gather") and target_hint
                 and target_hint.lower() in WOOD_SPECIES
                 and re.search(r"\b(trees?|wood|logs?|chop|cut|fell)\b", (message or "").lower())):
             target_hint = "wood"
-        if task and not det_task and is_creature_attack(message):
+        # Only a MODEL task is cleared here: a deterministic farm/mine/gather task
+        # was read from an imperative request, so a creature mention elsewhere in
+        # the same sentence must not silently cancel it.
+        if task and not det_task and not det_farm and is_creature_attack(message):
             log(f"Guard: creature attack clears model task '{task}'")
             task = ""
             target_hint = ""
-        count = derive_task_count(message, task, model_count, target_hint)
+        # A farm request carries its own seed count: 0 means "every seed she has".
+        if task == "farm":
+            # The model can raise a farm task from a bare "just seed"; without this the
+            # wire count would be 0 = "every seed she owns".
+            if not farm_count:
+                farm_count = count_from_message(message)
+                if not farm_count and model_count:
+                    try:
+                        farm_count = max(0, min(int(model_count), 400))
+                    except (TypeError, ValueError):
+                        pass
+            count = farm_count
+        else:
+            count = derive_task_count(message, task, model_count, target_hint)
         scope = derive_task_scope(message, task, target_hint, count)
+        if task == "farm":
+            # Farming reuses `scope` for the seed KIND (eternal|normal|"") - an existing
+            # wire key rather than a new one. The plugin refuses and asks when both kinds
+            # are in her pack and nothing was said.
+            global _LAST_FARM
+            scope = (farm_kind or seed_kind(message)) or None
+            _LAST_FARM = {"hint": target_hint or "", "count": count}
         radius = derive_task_radius(message, task, target_hint, count)
         if task in ("mine", "gather"):
             log(f"Task intent: {task} hint={target_hint or '?'} count={count if count else 'all'}"
@@ -3143,6 +3205,13 @@ async def run_chat(player: str, message: str, state: dict, with_audio: bool,
             ack = task_ack(task, target_hint, scope, count)
             if (say_line or "").strip() != ack:
                 log(f"Guard: task ack replaces model line -> {ack}")
+            say_line = ack
+        elif task == "farm":
+            log(f"Task intent: farm hint={target_hint or 'any'} count={count or 'all'}"
+                f" kind={scope or 'unspecified'}")
+            ack = farm_ack(count, target_hint)
+            if (say_line or "").strip() != ack:
+                log(f"Guard: farm ack replaces model line -> {ack}")
             say_line = ack
 
         # "Wield/switch to your battleaxe" is an equipment order even without the
@@ -3583,6 +3652,16 @@ async def npc_event(request: Request):
         return JSONResponse(status_code=400, content={"ok": False, "error": "bad json"})
     event = str(payload.get("event", "")).strip()
     detail = str(payload.get("detail", "")).strip()
+    global _PENDING_FARM
+    # Word-set match, not a substring: the detail crosses an HTTP + JSON + log round
+    # trip and a literal/sentence compare silently failed on it (measured 2026-10-25).
+    _words = set(re.findall(r"[a-z']+", detail.lower()))
+    if event == "task_failed" and {"which", "ones", "should", "plant"} <= _words:
+        # Her own question: hold the farm context so the answer can resolve it.
+        _PENDING_FARM = dict(_LAST_FARM or {})
+        log(f"Farm: awaiting seed kind, pending={_PENDING_FARM or {}}")
+    elif event == "task_done" and "seed" in detail.lower():
+        _PENDING_FARM = None
     if not event:
         return JSONResponse(status_code=422, content={"ok": False, "error": "event required"})
 

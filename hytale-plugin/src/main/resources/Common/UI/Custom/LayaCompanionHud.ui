@@ -54,6 +54,12 @@ Group {
           Value: 0.0;
         }
 
+        ProgressBar #IconFarm {
+          Anchor: (Width: 56, Height: 56, Left: 16, Top: 16);
+          BarTexturePath: "LayaIcons/IconFarm.png";
+          Value: 0.0;
+        }
+
         ProgressBar #IconStay {
           Anchor: (Width: 56, Height: 56, Left: 16, Top: 16);
           BarTexturePath: "LayaIcons/IconStay.png";
@@ -84,6 +90,13 @@ Group {
           Anchor: (Width: 88, Height: 88, Left: 0, Top: 0);
           Value: 0.0;
           Color: #5A9BD5;
+          MaskTexturePath: "LayaRingMask.png";
+        }
+
+        CircularProgressBar #RingFarm {
+          Anchor: (Width: 88, Height: 88, Left: 0, Top: 0);
+          Value: 0.0;
+          Color: #7FB34A;
           MaskTexturePath: "LayaRingMask.png";
         }
 

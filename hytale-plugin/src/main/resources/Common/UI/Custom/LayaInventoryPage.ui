@@ -1090,67 +1090,72 @@ Group {
           }
 
           ItemSlotButton #Gear0 {
-            Anchor: (Width: 58, Height: 58, Top: 2, Full: 0);
+            Anchor: (Width: 58, Height: 58, Top: 2);
             Background: #243447;
+            TooltipText: "Head";
 
             ItemSlot #Gear0Icon {
               Anchor: (Full: 0);
+              HitTestVisible: false;
               ShowQualityBackground: true;
               ShowDurabilityBar: true;
               ShowQuantity: true;
-              TooltipText: "Head";
             }
           }
 
           ItemSlotButton #Gear1 {
-            Anchor: (Width: 58, Height: 58, Top: 2, Full: 0);
+            Anchor: (Width: 58, Height: 58, Top: 2);
             Background: #243447;
+            TooltipText: "Chest";
 
             ItemSlot #Gear1Icon {
               Anchor: (Full: 0);
+              HitTestVisible: false;
               ShowQualityBackground: true;
               ShowDurabilityBar: true;
               ShowQuantity: true;
-              TooltipText: "Chest";
             }
           }
 
           ItemSlotButton #Gear2 {
-            Anchor: (Width: 58, Height: 58, Top: 2, Full: 0);
+            Anchor: (Width: 58, Height: 58, Top: 2);
             Background: #243447;
+            TooltipText: "Hands";
 
             ItemSlot #Gear2Icon {
               Anchor: (Full: 0);
+              HitTestVisible: false;
               ShowQualityBackground: true;
               ShowDurabilityBar: true;
               ShowQuantity: true;
-              TooltipText: "Hands";
             }
           }
 
           ItemSlotButton #Gear3 {
-            Anchor: (Width: 58, Height: 58, Top: 2, Full: 0);
+            Anchor: (Width: 58, Height: 58, Top: 2);
             Background: #243447;
+            TooltipText: "Legs";
 
             ItemSlot #Gear3Icon {
               Anchor: (Full: 0);
+              HitTestVisible: false;
               ShowQualityBackground: true;
               ShowDurabilityBar: true;
               ShowQuantity: true;
-              TooltipText: "Legs";
             }
           }
 
           ItemSlotButton #Gear4 {
-            Anchor: (Width: 58, Height: 58, Top: 2, Full: 0);
+            Anchor: (Width: 58, Height: 58, Top: 2);
             Background: #243447;
+            TooltipText: "Shield";
 
             ItemSlot #Gear4Icon {
               Anchor: (Full: 0);
+              HitTestVisible: false;
               ShowQualityBackground: true;
               ShowDurabilityBar: true;
               ShowQuantity: true;
-              TooltipText: "Shield";
             }
           }
 
