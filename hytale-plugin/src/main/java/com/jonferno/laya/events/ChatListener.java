@@ -79,7 +79,8 @@ public class ChatListener {
 
                 // --- THE FIX: deliver the reply to the player in-game ---
                 if (sender != null && say != null && !say.isEmpty()) {
-                    sender.sendMessage(Message.raw("Laya: " + say));
+                    sender.sendMessage(Message.raw(
+                        plugin.getNPCController().getCompanionName() + ": " + say));
                     LayaPlugin.log("Delivered reply to " + playerName + ": " + say);
                 }
 

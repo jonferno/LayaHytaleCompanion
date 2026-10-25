@@ -106,6 +106,12 @@ public final class LayaHudController {
 
     /** Removes the card by key. Logs once on the first successful removal. */
     public void hide(PlayerRef playerRef) {
+        // A show queued at join must not fire after an explicit /laya hud off:
+        // during the SHOW_DELAY_MS window `shown` is still false while `pendingShow`
+        // is true, so without clearing it here frame() would resurrect the card.
+        pendingShow = false;
+        pendingRef = null;
+        pendingPlayer = null;
         if (!shown || playerRef == null) {
             return;
         }
@@ -216,6 +222,7 @@ public final class LayaHudController {
             }
             LayaHud hud = hudFor(playerRef, player);
             if (hud != null) {
+                hud.setName(npc.getCompanionName());
                 hud.setValues(hp, npc.hudMaxHp(), state, downed);
                 String revive = "";
                 if (downed) {

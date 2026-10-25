@@ -38,6 +38,12 @@ public final class LayaInventoryPage extends InteractiveCustomUIPage<LayaInvento
     public void build(Ref<EntityStore> ref, UICommandBuilder b, UIEventBuilder events,
                       Store<EntityStore> store) {
         b.append("LayaInventoryPage.ui");
+        // Player-facing: use the configured companion name on the page title and
+        // her pack column (spec: the name everywhere the player sees it).
+        String cname = controller.getCompanionName();
+        if (cname == null || cname.isBlank()) cname = "Laya";
+        b.set("#Title.Text", "Your Inventory  |  " + cname);
+        b.set("#LayaLabel.Text", cname + "'s Pack");
         for (int i = 0; i < 45; i++) { // player
             setSlot(b, "#Player" + i + "Icon", controller.uiItemId(100 + i),
                 controller.uiQuantity(100 + i));

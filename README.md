@@ -63,6 +63,9 @@ message. Exact numbers depend on the provider, GPU, and whether vision is used.
 
 - Follow you, hold position, defend, attack, and use the custom HUD.
 - Talk with a natural voice and a lip/mouth animation that follows speech.
+- **Rename her** in Settings - she uses your chosen name in chat, on the overhead
+  nameplate, on the HUD card, in her own introduction, and in her system prompt, and
+  the name is remembered across restarts even with the bridge closed.
 - Remember useful facts and recent conversation.
 - Answer truthfully about what she is carrying: her live pack, held item and armor
   are injected into every turn, so she no longer invents weapons she does not have.
@@ -80,9 +83,20 @@ message. Exact numbers depend on the provider, GPU, and whether vision is used.
   midnight).
 - **Voice turns are spoken only** - hold the talk key and she answers out loud
   without printing the line to chat; typed chat still shows the text.
+- **Talk mode** in Settings switches that key between press-and-hold and a toggle
+  (press to start talking, press again to stop).
 - Edit her whole character-creator look on the appearance page, with real part
   names and texture previews, applied live and saved for next session.
 - Start fresh for each new player: no bundled keys, inventory, memory, or skin.
+
+## In-game commands
+
+- `/laya` - the companion's own help, with an appearance-editor link.
+- `/laya hud on` / `/laya hud off` - show or hide her HUD card. The choice is
+  remembered across restarts until you turn it back on.
+- `/laya reset memory` - shows what she remembers (facts, conversation, and the
+  recent things she watched you do) and how to clear it.
+- `/laya reset memory confirm` - clears all of that memory.
 
 ## Voice: Deepgram first
 
@@ -211,9 +225,10 @@ does not contain machine-specific paths.
 
 The web page at <http://127.0.0.1:8788> has two areas:
 
-- **Settings** - talk and teleport keys, voice engine and voices, audio devices,
-  LLM models and API keys, and the **personality** dropdown (default, spicy,
-  potty mouth, mean, flirty, depressed, military, unhinged).
+- **Settings** - talk and teleport keys, **talk mode** (hold or toggle),
+  **companion name**, voice engine and voices, audio devices, LLM models and API
+  keys, and the **personality** dropdown (default, spicy, potty mouth, mean,
+  flirty, depressed, military, unhinged).
 - **Laya Appearance Editor** - her full character-creator look, with real part
   names and texture previews, applied live and saved.
 

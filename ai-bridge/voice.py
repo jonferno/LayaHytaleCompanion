@@ -123,24 +123,51 @@ def _talk_loop(cfg, run_chat_fn, loop):
         return
     talk_key = cfg.get("talk_key", "x")
     player = cfg.get("player_name", "Jonferno")
+    mode = str(cfg.get("talk_mode", "hold")).strip().lower()
+    name = cfg.get("companion_name", "Laya")
     stt = STT()
     # warm STT in background so the first press is fast
     threading.Thread(target=stt.warm, daemon=True).start()
-    log(f"Hold '{talk_key.upper()}' to talk to Laya.")
+    log(f"{'Toggle' if mode == 'toggle' else 'Hold'} '{talk_key.upper()}' to talk to {name}.")
+    if talk_key == cfg.get("tp_key", "f8"):
+        log(f"Warning: talk key and teleport key are both '{talk_key}'.")
 
     try:
         while True:
+            # --- edge detection: wait for a press (and, in toggle mode, its release
+            # before this press is armed to START recording; a release-wait is
+            # mandatory because keyboard.is_pressed is a level check and would
+            # otherwise count one press as many). ---
             while not keyboard.is_pressed(talk_key):
                 time.sleep(0.03)
-            # record until release
+            if mode == "toggle":
+                # debounce: wait for the start press to be released
+                while keyboard.is_pressed(talk_key):
+                    time.sleep(0.03)
+                time.sleep(0.3)
             frames = []
             def cb(indata, frames_n, time_info, status):
                 frames.append(indata.copy())
             with sd.InputStream(samplerate=SAMPLE_RATE, channels=1, dtype="float32",
                                 callback=cb, device=cfg.get("input_device")):
-                print(f"[Laya Voice] Recording... (release {talk_key.upper()} to send)", flush=True)
-                while keyboard.is_pressed(talk_key):
-                    time.sleep(0.03)
+                if mode == "toggle":
+                    print(f"[Laya Voice] Recording... (press {talk_key.upper()} again to send)", flush=True)
+                    started = time.time()
+                    # wait for the NEXT press, then its release
+                    while True:
+                        if keyboard.is_pressed(talk_key):
+                            while keyboard.is_pressed(talk_key):
+                                time.sleep(0.03)
+                            break
+                        if time.time() - started >= 120:
+                            print("[Laya Voice] Toggle recording hit the 120s cap", flush=True)
+                            break
+                        time.sleep(0.03)
+                    time.sleep(0.3)
+                else:
+                    print(f"[Laya Voice] Recording... (release {talk_key.upper()} to send)", flush=True)
+                    while keyboard.is_pressed(talk_key):
+                        time.sleep(0.03)
             if not frames:
                 continue
             audio = np.concatenate(frames, axis=0).reshape(-1)

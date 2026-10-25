@@ -34,7 +34,9 @@ from pydantic import BaseModel
 from stance import stance_intent, stance_ack, STANCE_ACKS
 from gearcheck import asks_about_gear
 from idlelogic import should_fire, idle_gap_ms
+import memreset
 from personalities import PERSONALITIES, personality_layer, DEFAULT_PERSONALITY
+from naming import sanitize_companion_name, coerce_talk_mode
 
 BASE_DIR = Path(__file__).resolve().parent
 MODELS_DIR = BASE_DIR.parent / "models"
@@ -127,6 +129,10 @@ def load_config():
         # Task 4: personality trait layer appended to the base persona. Unknown
         # or missing values fall back to "default" (no layer).
         "personality": "default",
+        # Task 1: the companion's display name (plugin HUD, prompt, voice loop)
+        # and the push-to-talk mode. Anything but "toggle" coerces to "hold".
+        "companion_name": "Laya",
+        "talk_mode": "hold",
         "voice_helper_enabled": True,
         "tp_key": "f8",
         # Plugin HTTP bridge surface the event reactions are pushed back to.
@@ -408,9 +414,22 @@ def load_persona():
     return """You are Laya, a loyal AI companion in the game Hytale. You speak concisely, with warmth and a touch of dry humor. You are in the world with the player, watching their back. When you speak, you also decide what to do: follow, attack, stay, or move. Always include a "say" line (what you say out loud) and an "action" line (what you do). Keep responses under 2 sentences."""
 
 def build_persona() -> str:
+    name = CFG.get("companion_name", "Laya") or "Laya"
     base = load_persona()
+    # Escape the replacement: a hand-edited name containing a backslash (or
+    # "\g<...>") would otherwise make re.sub raise at import time.
+    base = re.sub(r"\bLaya\b", name.replace("\\", "\\\\"), base, count=1)  # the base file's opening only
     layer = personality_layer(CFG.get("personality", DEFAULT_PERSONALITY))
-    return f"{base}\n\n{layer}" if layer else base
+    # The name is stated twice and made authoritative: memory facts and recent
+    # history can contain her old name (she said "I'm Laya" before a rename), and
+    # without this rule the model mirrors that.
+    identity = (
+        f"Your name is {name}. You are {name}, the player's companion.\n"
+        f"If anything in your memory, notes, or earlier conversation calls you a "
+        f"different name (for example \"Laya\"), that is outdated: your name is "
+        f"{name} and you always answer with {name} when asked."
+    )
+    return f"{identity}\n\n{base}" + (f"\n\n{layer}" if layer else "")
 
 
 PERSONA = build_persona()
@@ -478,10 +497,15 @@ def memory_block() -> str:
     stable facts belong here.
     """
     parts = []
+    # The name must never be reinforced by stale labels: if the companion was
+    # renamed, a "Facts Laya remembers:" / "Laya: ..." label would tell the model
+    # her name is Laya again. Use the configured name here. The "Laya event:"
+    # marker is NOT changed - the bridge emits that string literally into turns.
+    cname = CFG.get("companion_name", "Laya") or "Laya"
     facts = [f for f in MEMORY.get("facts", [])[-20:]
              if not _TRANSIENT_FACT.search(str(f))]
     if facts:
-        parts.append("Facts Laya remembers:\n" + "\n".join(f"- {f}" for f in facts))
+        parts.append(f"Facts {cname} remembers:\n" + "\n".join(f"- {f}" for f in facts))
     chat = [c for c in MEMORY.get("chat", [])[-12:]
             if c.get("p")
             and not str(c.get("p", "")).startswith("(observed:")
@@ -489,7 +513,7 @@ def memory_block() -> str:
             # turn - rendering it as "Player: (idle)" would fake one.
             and not str(c.get("p", "")).startswith("(idle)")]
     if chat:
-        lines = [f"Player: {c.get('p','')}\nLaya: {c.get('l','')}" for c in chat[-8:]]
+        lines = [f"Player: {c.get('p','')}\n{cname}: {c.get('l','')}" for c in chat[-8:]]
         parts.append("Recent conversation:\n" + "\n".join(lines))
     return "\n\n".join(parts)
 
@@ -3572,6 +3596,27 @@ async def npc_event(request: Request):
     return {"ok": True, "event": event, "detail": detail}
 
 
+@app.post("/api/memory/reset")
+async def api_memory_reset(request: Request):
+    """Clear the companion's memory (facts, chat, events). Confirm-gated."""
+    try:
+        body = json.loads((await request.body()).decode("utf-8") or "{}")
+    except Exception:
+        body = {}
+    confirm = bool(body.get("confirm"))
+    try:
+        n_facts, n_turns, n_events = memreset.counts(MEMORY)
+        if confirm:
+            memreset.clear(MEMORY)
+            save_memory()
+            log(f"Memory reset by command: {n_facts} facts, {n_turns} turns, {n_events} events")
+        return {"ok": True, "dry_run": not confirm,
+                "facts": n_facts, "turns": n_turns, "events": n_events}
+    except Exception as e:
+        log(f"Memory reset failed: {e}")
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
 @app.post("/tts")
 async def tts(text: str):
     wav_bytes = TTS.synthesize(text, voice=CFG["tts_voice"])
@@ -3636,6 +3681,7 @@ async def save_config(request: Request):
         current = {}
 
     # Sanitize before merging
+    prev_name = current.get("companion_name", "Laya")
     cleaned = {}
     for k, v in body.items():
         # Never let a masked display value overwrite a real API key
@@ -3646,12 +3692,33 @@ async def save_config(request: Request):
         # the HTML input
         if k in ("groq_models", "zai_models", "nano_models") and isinstance(v, str):
             v = [m.strip() for m in v.split(",") if m.strip()]
+        if k == "companion_name":
+            v = sanitize_companion_name(v, prev_name)
+        if k == "talk_mode":
+            v = coerce_talk_mode(v)
         cleaned[k] = v
 
     current.update(cleaned)
     cfg_path.write_text(json.dumps(current, indent=4), encoding="utf-8")
     # Hot-reload
     CFG.update(cleaned)
+    if CFG.get("companion_name", "Laya") != prev_name:
+        log(f"Companion name changed: {prev_name} -> {CFG.get('companion_name')}")
+    # Task 3: push the name to the plugin so her chat prefix, nameplate and HUD card
+    # update live. This is unconditional on purpose: the plugin persists the name
+    # itself, so a rename made while Hytale was closed would otherwise be lost (the
+    # push fails, no config/laya-name.json is written, the next boot loads the stale
+    # name and a later save of the same name reports no change and never pushes).
+    # Pushing on every save self-heals that dropped push; the plugin no-ops an
+    # unchanged name, so it is idempotent and cheap.
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            r = await client.post(PLUGIN_COMMAND_URL,
+                                  json={"action": "set_name",
+                                        "name": CFG.get("companion_name", "Laya")})
+        log(f"Name update pushed: {CFG.get('companion_name')} ({r.status_code})")
+    except Exception as e:
+        log(f"Name update push failed: {e}")
     if any(k in cleaned for k in ("nano_api_key", "groq_api_key", "google_api_key",
                                   "zai_api_key", "nano_models", "groq_models",
                                   "zai_models", "google_model")):
@@ -3660,7 +3727,7 @@ async def save_config(request: Request):
     if "tts_model" in cleaned:
         threading.Thread(target=TTS.reload, daemon=True).start()
         log(f"TTS model change -> reloading {cleaned['tts_model']} in background")
-    if "persona_prompt" in body or "personality" in cleaned:
+    if "persona_prompt" in body or "personality" in cleaned or "companion_name" in cleaned:
         global PERSONA
         PERSONA = build_persona()
     log(f"Config saved: {list(cleaned.keys())}")
@@ -3870,6 +3937,14 @@ a.home:hover{color:#7ec8e3}
 <div><label>Player name (in-game)</label><input id="player_name"></div>
 <div><label>Personality (tone layer)</label><select id="personality"></select></div>
 </div>
+<div class="row">
+<div><label>Companion name</label><input id="companion_name" placeholder="Laya"></div>
+<div><label>Talk mode</label>
+<select id="talk_mode">
+  <option value="hold">Hold (press and hold)</option>
+  <option value="toggle">Toggle (press to start, press to stop)</option>
+</select></div>
+</div>
 <div class="row" style="align-items:flex-end">
 <div><label>TTS engine</label>
 <select id="tts_engine">
@@ -3932,7 +4007,7 @@ Speak replies (TTS)</label>
 <div id="result"></div>
 
 <script>
-const FIELDS = ['talk_key','tp_key','player_name','personality','tts_engine','tts_voice','edge_voice','deepgram_model','tts_speed','tts_model','nano_models','groq_models','google_model',
+const FIELDS = ['talk_key','tp_key','player_name','companion_name','talk_mode','personality','tts_engine','tts_voice','edge_voice','deepgram_model','tts_speed','tts_model','nano_models','groq_models','google_model',
   'llm_temperature','llm_max_tokens','nano_api_key','groq_api_key','google_api_key','zai_api_key','deepgram_api_key','zai_models'];
 const NUM = new Set(['tts_speed','llm_temperature','llm_max_tokens']);
 const ARR = new Set(['nano_models','groq_models','zai_models']);

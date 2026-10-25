@@ -140,6 +140,13 @@ public class NPCController {
     // Cycle 6: her inventory survives sessions (the NPC entity itself does not).
     private static final String STATE_JSON = System.getenv().getOrDefault(
         "LAYA_STATE_JSON", "config/laya-inventory.json");
+    // Task 3 (name): her name survives sessions AND a cold start with no bridge.
+    private static final String NAME_JSON = System.getenv().getOrDefault(
+        "LAYA_NAME_JSON", "config/laya-name.json");
+    // Task 3 (hud): the player's show/hide choice survives a relaunch (the join
+    // gate in LayaPlugin reads it before queueing the card). Absent -> true.
+    private static final String HUD_JSON = System.getenv().getOrDefault(
+        "LAYA_HUD_JSON", "config/laya-hud.json");
     private static final double IDENTIFY_MAX_DIST = 6.4;   // 16 ray steps x 0.4 blocks
     private static final double SCAN_RADIUS = 16.0;        // mine/gather search radius (near the player)
 
@@ -206,6 +213,10 @@ public class NPCController {
         .build();
     private static final String NPC_EVENT_URL = System.getenv().getOrDefault(
         "Laya_NPC_EVENT_URL", "http://127.0.0.1:8788/npc_event");
+    // Task 2 (commands): the memory reset endpoint (POST {"confirm":bool}).
+    // Unlike NPC_EVENT_URL this one is request/response: we read the answer.
+    private static final String MEMORY_RESET_URL = System.getenv().getOrDefault(
+        "Laya_MEMORY_RESET_URL", "http://127.0.0.1:8788/api/memory/reset");
 
     final LayaPlugin plugin;
     private boolean running = false;
@@ -226,6 +237,12 @@ public class NPCController {
     private boolean talking = false;
     private long nextFaceClearMs = 0;
     private String savedNameplate = null;
+    // Task 3 (name): the player-facing name; persisted to NAME_JSON, restored at spawn.
+    // volatile: written on the bridge HTTP thread (set_name) and read on the world thread.
+    private volatile String companionName = "Laya";
+    // Task 3 (hud): the player's choice, persisted to HUD_JSON and restored in start().
+    // volatile: written on the world thread (/laya hud) and read on the join thread.
+    private volatile boolean hudEnabled = true;
     private float savedHeadPitch = Float.NaN;
     Ref<EntityStore> layaRef;
     NPCEntity npcEntity;
@@ -1015,6 +1032,8 @@ public class NPCController {
     public void start() {
         running = true;
         state.put("mode", "idle");
+        loadCompanionName();   // Task 3: correct name on a cold start, with no bridge
+        loadHudEnabled();      // Task 3: the show/hide choice, before the join gate reads it
         plugin.log("NPC controller initialized.");
     }
 
@@ -1022,8 +1041,10 @@ public class NPCController {
      * Task 7: run {@code body} on the world thread, or directly when no world exists yet
      * (nothing to serialize against). {@code CombatController.setStance} calls this from
      * the bridge HTTP thread to hand a channel cancel to the thread that owns it.
+     * Task 3: widened to public so {@code HudCommand} (another package) can marshal its
+     * show/hide onto the world thread the same way.
      */
-    void runOnWorld(Runnable body) {
+    public void runOnWorld(Runnable body) {
         if (body == null) return;
         World w = world;
         if (w == null) {
@@ -1182,6 +1203,172 @@ public class NPCController {
             plugin.log("Laya: inventory restored (" + restored + " stacks from " + STATE_JSON + ")");
         } catch (Throwable t) {
             plugin.log("Laya: inventory restore failed: " + t);
+        }
+    }
+
+    // --- Task 3 (name): the companion name, persisted so a cold start needs no bridge ---
+
+    /** The player-facing name. Never null/empty ("Laya" is the floor). */
+    public String getCompanionName() {
+        return companionName;
+    }
+
+    /**
+     * Sanitize, persist and apply a new companion name. Runs from the bridge HTTP
+     * thread ({@code set_name}) and is safe there: the persistence is plain file IO
+     * and the nameplate/HUD writes are handed to the world thread.
+     *
+     * <p>Sanitizing mirrors {@code ai-bridge/naming.sanitize_companion_name} exactly:
+     * strip control chars and the markup-ish set {@code " } { [ ] , :}, collapse
+     * whitespace and cap at 24; an empty result keeps the current name. This is the
+     * same set that would break the plugin's naive JSON scanner, so a hostile name
+     * cannot escape the field it arrived in.
+     */
+    public void setCompanionName(String raw) {
+        String cleaned = sanitizeName(raw);
+        if (cleaned == null || cleaned.isEmpty() || cleaned.equals(companionName)) {
+            return;   // empty/invalid keeps the current name; unchanged is a no-op
+        }
+        companionName = cleaned;   // volatile: published before the world-thread apply below
+        saveCompanionName();
+        final String name = cleaned;
+        // Task 3: nameplate + HUD are world-thread state (same rule as applyThinking).
+        runOnWorld(() -> {
+            try {
+                if (layaRef != null && worldStore != null) {
+                    Nameplate np = worldStore.getComponent(layaRef, Nameplate.getComponentType());
+                    if (np != null) np.setText(name);
+                }
+            } catch (Throwable t) {
+                plugin.log("Nameplate rename failed: " + t);
+            }
+            // A stale capture would restore the OLD name when thinking ends.
+            savedNameplate = null;
+        });
+        pokeHud();   // the 500 ms card frame picks the new name up on the next tick
+    }
+
+    /**
+     * The bridge's sanitizer, ported. Trim; drop control chars and
+     * {@code " } { [ ] , :}; collapse runs of whitespace; cap 24; empty -> null
+     * (the caller keeps the current name).
+     */
+    private static String sanitizeName(String raw) {
+        if (raw == null) return null;
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < raw.length(); i++) {
+            char c = raw.charAt(i);
+            if (Character.isISOControl(c)) continue;
+            switch (c) {
+                case '"', '}', '{', '[', ']', ',', ':' -> {
+                    continue;
+                }
+                default -> sb.append(c);
+            }
+        }
+        // Collapse whitespace runs, then trim (the bridge does sub -> strip).
+        String collapsed = sb.toString().replaceAll("\\s+", " ").trim();
+        if (collapsed.isEmpty()) return null;
+        return collapsed.length() > 24 ? collapsed.substring(0, 24) : collapsed;
+    }
+
+    /** Write {"name": "<name>"} to NAME_JSON. Same pattern as saveInventory. */
+    private void saveCompanionName() {
+        try {
+            JsonObject root = new JsonObject();
+            root.addProperty("name", companionName);
+            java.nio.file.Path p = Paths.get(NAME_JSON);
+            if (p.getParent() != null) Files.createDirectories(p.getParent());
+            Files.write(p, root.toString().getBytes(StandardCharsets.UTF_8));
+            plugin.log("Laya: name saved (" + companionName + " -> " + NAME_JSON + ")");
+        } catch (Throwable t) {
+            plugin.log("Laya: name save failed: " + t);
+        }
+    }
+
+    /**
+     * Read NAME_JSON into {@link #companionName}. Called from {@code start()} so the
+     * name is right before she spawns. Absent or invalid -> keep "Laya" (the field's
+     * default). Never throws.
+     */
+    private void loadCompanionName() {
+        try {
+            java.nio.file.Path p = Paths.get(NAME_JSON);
+            if (!Files.exists(p)) {
+                plugin.log("Laya: no saved name yet (" + NAME_JSON + ")");
+                return;
+            }
+            String raw = Files.readString(p, StandardCharsets.UTF_8);
+            JsonObject root = JsonParser.parseString(raw).getAsJsonObject();
+            String saved = root.has("name") ? root.get("name").getAsString() : null;
+            String cleaned = sanitizeName(saved);
+            if (cleaned != null && !cleaned.isEmpty()) {
+                companionName = cleaned;
+                plugin.log("Laya: name restored (" + companionName + " from " + NAME_JSON + ")");
+            } else {
+                plugin.log("Laya: saved name invalid, keeping " + companionName);
+            }
+        } catch (Throwable t) {
+            plugin.log("Laya: name restore failed: " + t);
+        }
+    }
+
+    // --- Task 3 (hud): the show/hide choice, persisted so it survives a relaunch ---
+
+    /** True when the companion card should be shown (the player's last choice; default true). */
+    public boolean isHudEnabled() {
+        return hudEnabled;
+    }
+
+    /**
+     * Record the player's show/hide choice and persist it. The HUD itself is applied
+     * by the caller (the command, on the world thread) — this only owns the flag and
+     * {@link #HUD_JSON}, so a repeat {@code off} still persists.
+     */
+    public void setHudEnabled(boolean on) {
+        if (hudEnabled == on) {
+            return;
+        }
+        hudEnabled = on;
+        saveHudEnabled();
+    }
+
+    /** Write {"enabled": <bool>} to HUD_JSON. Same pattern as saveCompanionName. */
+    private void saveHudEnabled() {
+        try {
+            JsonObject root = new JsonObject();
+            root.addProperty("enabled", hudEnabled);
+            java.nio.file.Path p = Paths.get(HUD_JSON);
+            if (p.getParent() != null) Files.createDirectories(p.getParent());
+            Files.write(p, root.toString().getBytes(StandardCharsets.UTF_8));
+            plugin.log("Laya: hud saved (" + hudEnabled + " -> " + HUD_JSON + ")");
+        } catch (Throwable t) {
+            plugin.log("Laya: hud save failed: " + t);
+        }
+    }
+
+    /**
+     * Read HUD_JSON into {@link #hudEnabled}. Called from {@code start()} so the join
+     * gate sees the choice before the card is queued. Absent or invalid -> keep true
+     * (the field's default). Never throws.
+     */
+    private void loadHudEnabled() {
+        try {
+            java.nio.file.Path p = Paths.get(HUD_JSON);
+            if (!Files.exists(p)) {
+                plugin.log("Laya: no saved hud preference yet (" + HUD_JSON + ")");
+                return;
+            }
+            String raw = Files.readString(p, StandardCharsets.UTF_8);
+            JsonObject root = JsonParser.parseString(raw).getAsJsonObject();
+            if (root.has("enabled")) {
+                hudEnabled = root.get("enabled").getAsBoolean();
+                plugin.log("Laya: hud restored (" + hudEnabled + " from " + HUD_JSON + ")");
+            } else {
+                plugin.log("Laya: saved hud invalid, keeping " + hudEnabled);
+            }
+        } catch (Throwable t) {
+            plugin.log("Laya: hud restore failed: " + t);
         }
     }
 
@@ -1477,6 +1664,14 @@ public class NPCController {
                         layaEntityId = "laya_npc_" + System.currentTimeMillis();
                         if (result.second() instanceof NPCEntity npc) {
                             npcEntity = npc;
+                            // Task 3: the engine named her from npc.laya.name; override.
+                            try {
+                                Nameplate np = worldStore.getComponent(
+                                    layaRef, Nameplate.getComponentType());
+                                if (np != null) np.setText(companionName);
+                            } catch (Throwable t) {
+                                plugin.log("Nameplate apply at spawn failed: " + t);
+                            }
                             bindFollowSlot(npc, model);
                             loadInventory();   // Cycle 6: her pack survives sessions
                             loadSkin();        // Cycle 12: her look survives sessions
@@ -2610,7 +2805,7 @@ public class NPCController {
         try {
             // Same delivery ChatListener uses: the PlayerRef component owns the chat feed.
             if (playerRef != null) {
-                playerRef.sendMessage(Message.raw("Laya: " + text));
+                playerRef.sendMessage(Message.raw(getCompanionName() + ": " + text));
             }
         } catch (Throwable t) {
             plugin.log("Laya: could not deliver chat line: " + t);
@@ -2643,7 +2838,7 @@ public class NPCController {
                 Nameplate np = worldStore.getComponent(layaRef, Nameplate.getComponentType());
                 if (np != null) {
                     savedNameplate = np.getText();
-                    np.setText("Laya  ...");
+                    np.setText(getCompanionName() + "  ...");
                 }
                 HeadRotation hr = worldStore.getComponent(layaRef, HeadRotation.getComponentType());
                 if (hr != null) {
@@ -2821,6 +3016,10 @@ public class NPCController {
             handleGiftHand();
         } else if ("set_appearance".equalsIgnoreCase(action)) {
             handleAppearance(json);
+        } else if ("set_name".equalsIgnoreCase(action)) {
+            // Task 3: the bridge pushes the new name here on a config change. A dropped
+            // command is harmless: the plugin loads the saved name at spawn.
+            setCompanionName(extractJsonField(json, "name"));
         } else if ("move_to".equalsIgnoreCase(action)) {
             // Task 7 (spec section 6, no movement while downed): refuse a move_to while she
             // is down. No state is touched and nothing is stashed, so no follow-slot write,
@@ -4174,6 +4373,84 @@ public class NPCController {
             .replace("\t", "\\t");
     }
 
+    // --- Task 2 (commands): /laya reset memory -> POST /api/memory/reset ---
+
+    /**
+     * POST /api/memory/reset and READ the answer. This is deliberately NOT
+     * {@link #postEvent(String)}: that one is fire-and-forget and returns nothing,
+     * so a command built on it could neither print the counts nor report a failure.
+     * Same request-building rules otherwise (HTTP/1.1, JSON content type, 10 s
+     * timeout, Content-Length never set by us).
+     *
+     * <p>Runs off-thread: the returned future carries the parsed result, so the
+     * command thread is never blocked by the HTTP round-trip.
+     *
+     * <p>Failure is {@code ok=false} in ALL of: a non-2xx status, a body whose
+     * {@code ok} is false, or any exception (connection refused, timeout, ...).
+     *
+     * @param confirm false = dry run (the bridge counts but clears nothing)
+     */
+    public CompletableFuture<ResetResult> resetMemory(boolean confirm) {
+        return CompletableFuture.supplyAsync(() -> {
+            ResetResult r = new ResetResult();
+            r.dryRun = !confirm;
+            try {
+                HttpRequest request = HttpRequest.newBuilder(URI.create(MEMORY_RESET_URL))
+                    .timeout(Duration.ofSeconds(10))
+                    .version(HttpClient.Version.HTTP_1_1)
+                    .header("Content-Type", "application/json; charset=UTF-8")
+                    .header("Accept", "application/json")
+                    .POST(HttpRequest.BodyPublishers.ofString(
+                        "{\"confirm\":" + confirm + "}", StandardCharsets.UTF_8))
+                    .build();
+                HttpResponse<String> response = HTTP.send(request, HttpResponse.BodyHandlers.ofString());
+                int status = response.statusCode();
+                String body = response.body() == null ? "" : response.body();
+                // Parse with the class's existing lightweight field scanner (no JSON library).
+                boolean ok = extractJsonBool(body, "ok");
+                Integer facts = extractJsonInt(body, "facts");
+                Integer turns = extractJsonInt(body, "turns");
+                Integer events = extractJsonInt(body, "events");
+                if (facts != null) r.facts = facts;
+                if (turns != null) r.turns = turns;
+                if (events != null) r.events = events;
+                Boolean dry = extractJsonBoolOrNull(body, "dry_run");
+                if (dry != null) r.dryRun = dry;
+                if (status < 200 || status >= 300) {
+                    // Non-2xx: never a success, whatever the body claims.
+                    r.ok = false;
+                    String err = extractJsonField(body, "error");
+                    r.error = err != null ? err : ("HTTP " + status);
+                } else if (!ok) {
+                    // 2xx with {"ok":false} (or no ok field at all): honest failure.
+                    r.ok = false;
+                    String err = extractJsonField(body, "error");
+                    r.error = err != null ? err : "bridge reported ok=false";
+                } else {
+                    r.ok = true;
+                }
+                plugin.log("Laya memory reset (confirm=" + confirm + ") -> status=" + status
+                    + " ok=" + r.ok + " facts=" + r.facts + " turns=" + r.turns
+                    + " events=" + r.events + (r.error != null ? " error=" + r.error : ""));
+            } catch (Exception e) {
+                r.ok = false;
+                r.error = e.getClass().getSimpleName();
+                plugin.log("Laya memory reset failed: " + e.getClass().getSimpleName() + ": " + e.getMessage());
+            }
+            return r;
+        });
+    }
+
+    /** Carries the /api/memory/reset answer. {@code ok} is true only for a real 2xx success. */
+    public static final class ResetResult {
+        public boolean ok;
+        public boolean dryRun;
+        public int facts;
+        public int turns;
+        public int events;
+        public String error;
+    }
+
     // --- Minimal JSON field extraction (no external library) ---
 
     private String extractJsonField(String json, String field) {
@@ -4234,6 +4511,16 @@ public class NPCController {
     private boolean extractJsonBool(String json, String field) {
         String v = extractJsonField(json, field);
         return v != null && v.trim().equalsIgnoreCase("true");
+    }
+
+    /** Like {@link #extractJsonBool} but null when the field is absent (absent != false). */
+    private Boolean extractJsonBoolOrNull(String json, String field) {
+        String v = extractJsonField(json, field);
+        if (v == null) return null;
+        String t = v.trim();
+        if (t.equalsIgnoreCase("true")) return Boolean.TRUE;
+        if (t.equalsIgnoreCase("false")) return Boolean.FALSE;
+        return null;
     }
 
     private String layaEntityId = null;

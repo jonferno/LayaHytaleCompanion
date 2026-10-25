@@ -41,6 +41,9 @@ public final class LayaHud extends CustomUIHud {
     private float maxHp = 100f;
     private String state = DEFAULT_STATE;
     private boolean downed = false;
+    // Task 3 (name): the companion name shown on the card. Set from the controller;
+    // DEFAULT_NAME until then, so the card is never blank.
+    private String name = DEFAULT_NAME;
 
     // Last-sent snapshot, so an unchanged 500 ms frame pushes nothing. The fields
     // start at the built defaults and build() records them as sent, so the first
@@ -52,6 +55,7 @@ public final class LayaHud extends CustomUIHud {
     private boolean sentOnce = false;
     private String lastRevive = null;
     private String lastGear = null;
+    private String lastName = null;
 
     public LayaHud(PlayerRef playerRef) {
         super(playerRef, "laya_companion", 0);
@@ -66,6 +70,7 @@ public final class LayaHud extends CustomUIHud {
         lastMaxHp = maxHp;
         lastState = state;
         lastDowned = downed;
+        lastName = name;
         sentOnce = true;
     }
 
@@ -88,15 +93,21 @@ public final class LayaHud extends CustomUIHud {
     }
 
     /**
-     * The Task 3 entry point: clamp, colour, override, then push when changed.
-     *
-     * @param hp     live health; clamped to {@code 0..maxHp}
-     * @param maxHp  the role maximum ({@link com.jonferno.laya.npc.CombatController#MAX_HP});
-     *               anything {@code <= 0} falls back to 100 so the fraction is never NaN
-     * @param state  the state word chosen by the controller ({@code following},
-     *               {@code holding}, {@code attacking}, {@code defending}); ignored while downed
-     * @param downed the downed override: empty bar and {@link #DOWNED_TEXT}
+     * Task 3 (name): set the companion name shown on the card. A change pushes
+     * immediately; the value is re-stated by every later {@code applyCurrent}, so
+     * a rename survives the 500 ms refresh too. World-thread only (the card's own
+     * builder writes are).
      */
+    public void setName(String n) {
+        String v = n == null || n.isEmpty() ? DEFAULT_NAME : n;
+        if (v.equals(lastName)) return;
+        lastName = v;
+        this.name = v;
+        UICommandBuilder b = new UICommandBuilder();
+        b.set("#Name.Text", v);
+        update(false, b);
+    }
+
     /** Revive countdown line; empty string hides it. Only Text is set (safe property). */
     public void setRevive(String text) {
         String t = text == null ? "" : text;
@@ -127,6 +138,16 @@ public final class LayaHud extends CustomUIHud {
         b.set(path + ".Quantity", present ? 1 : 0);
     }
 
+    /**
+     * The Task 3 entry point: clamp, colour, override, then push when changed.
+     *
+     * @param hp     live health; clamped to {@code 0..maxHp}
+     * @param maxHp  the role maximum ({@link com.jonferno.laya.npc.CombatController#MAX_HP});
+     *               anything {@code <= 0} falls back to 100 so the fraction is never NaN
+     * @param state  the state word chosen by the controller ({@code following},
+     *               {@code holding}, {@code attacking}, {@code defending}); ignored while downed
+     * @param downed the downed override: empty bar and {@link #DOWNED_TEXT}
+     */
     public void setValues(float hp, float maxHp, String state, boolean downed) {
         float max = maxHp > 0f ? maxHp : 100f;
         float clamped = hp < 0f ? 0f : Math.min(hp, max);
@@ -165,7 +186,7 @@ public final class LayaHud extends CustomUIHud {
      * so red would otherwise sit on top of green).
      */
     private void applyCurrent(UICommandBuilder b) {
-        b.set("#Name.Text", DEFAULT_NAME);
+        b.set("#Name.Text", name);
 
         if (downed) {
             b.set("#Hp.Text", "0 / " + (int) maxHp);

@@ -1086,7 +1086,7 @@ Group {
           Label #GearLabel {
             Anchor: (Width: 58);
             Text: "Equipped";
-            Style: (FontSize: 16, RenderBold: true, TextColor: #FFFFFF, HorizontalAlignment: Center);
+            Style: (FontSize: 16, RenderBold: true, TextColor: #FFFFFF, HorizontalAlignment: Center, ShrinkTextToFit: true, MinShrinkTextToFitFontSize: 11);
           }
 
           ItemSlotButton #Gear0 {

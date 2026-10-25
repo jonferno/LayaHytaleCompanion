@@ -74,7 +74,11 @@ public class LayaPlugin extends JavaPlugin {
                         var player = store.getComponent(
                             ref, com.hypixel.hytale.server.core.entity.entities.Player.getComponentType());
                         if (player != null) {
-                            hudController.queueShow(playerRef, player);
+                            // Task 3: gate the join show on the saved choice, or /laya hud off
+                            // looks broken after a rejoin (the card would reappear).
+                            if (npcController.isHudEnabled()) {
+                                hudController.queueShow(playerRef, player);
+                            }
                         }
                     }
                 }
@@ -140,6 +144,11 @@ public class LayaPlugin extends JavaPlugin {
 
     public NPCController getNPCController() {
         return npcController;
+    }
+
+    /** The companion-card controller (Task 3: the /laya hud command drives it). */
+    public LayaHudController getHudController() {
+        return hudController;
     }
 
     public void sendPlayerMessage(String text) {
