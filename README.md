@@ -75,33 +75,33 @@ message. Exact numbers depend on the provider, GPU, and whether vision is used.
 
 - Follow you, hold position, defend, attack, and use the custom HUD.
 - Talk with a natural voice and a lip/mouth animation that follows speech.
-- **Rename her** in Settings - she uses your chosen name in chat, on the overhead
+- **Rename her** in Settings: she uses your chosen name in chat, on the overhead
   nameplate, on the HUD card, in her own introduction, and in her system prompt, and
   the name is remembered across restarts even with the bridge closed.
 - Remember useful facts and recent conversation.
 - Answer truthfully about what she is carrying: her live pack, held item and armor
   are injected into every turn, so she no longer invents weapons she does not have.
-- **Pick a personality** in Settings - default, spicy, potty mouth, mean, flirty,
-  depressed, military, or unhinged - as a trait layer over her base character.
+- **Pick a personality** in Settings: default, spicy, potty mouth, mean, flirty,
+  depressed, military, or unhinged, as a trait layer over her base character.
 - Mine and gather with a deterministic task layer and block-name knowledge:
   "gather all that wheat", "gather 5 carrots", "gather the sunflowers", "gather
   everything around us", "gather all the stone in a 50x50".
 - **Farm**: till a plot in front of you and plant seeds from her pack or a nearby
-  chest - "plant five carrot seeds", "plant any seeds you have", "just seed" - see
+  chest: "plant five carrot seeds", "plant any seeds you have", "just seed". See
   the Farming section below. A farming icon appears on the HUD while she works.
 - **Harvest**: reap every ripe crop around you with the engine's own harvest call -
-  "harvest", "harvest the carrots", "harvest 5", "harvest all in the 100x100" - and
+  "harvest", "harvest the carrots", "harvest 5", "harvest all in the 100x100", and
   replant from her pack. See the Harvesting section below.
 - Use a custom inventory page with Laya's pack, gear slots, player inventory,
   stacking, sorting, and click/double-click/right-click transfers, and a centred
   "Equipped" column.
 - **Break the silence on her own**: after two minutes without a message she looks
   around (and sometimes at your screen) and says something about what you are
-  doing, spoken aloud with no chat text - then backs off to about five minutes.
+  doing, spoken aloud with no chat text, then backs off to about five minutes.
 - Look at the player's screen when asked to, when screen vision is configured.
 - Know the real in-game time and reason about it (no more "before it's dark" at
   midnight).
-- **Voice turns are spoken only** - hold the talk key and she answers out loud
+- **Voice turns are spoken only**: hold the talk key and she answers out loud
   without printing the line to chat; typed chat still shows the text.
 - **Talk mode** in Settings switches that key between press-and-hold and a toggle
   (press to start talking, press again to stop).
@@ -111,7 +111,7 @@ message. Exact numbers depend on the provider, GPU, and whether vision is used.
 
 ## Farming
 
-Ask her in plain words and she does the whole job herself - walk to the plot, till
+Ask her in plain words and she does the whole job herself: walk to the plot, till
 the soil, plant the seed, and tell you what she actually planted (counted from the
 block entities, not from what she meant to do).
 
@@ -134,7 +134,7 @@ plant 10 eternal wheat seeds
   if only one kind is reachable she uses it silently. Name the kind to skip the question.
 - **She needs a hoe.** Tilling spends tool durability, and a worn-out hoe does nothing
   at all, so she checks before she swings, holds the one with the most life left, and
-  goes looking in nearby chests for a spare when hers breaks - and tells you when there
+  goes looking in nearby chests for a spare when hers breaks, and tells you when there
   is no spare instead of swinging a dead tool.
 - **She walks where the work is.** If the ground stops the engine's straight-line mover
   and she stalls on the spot, she steps beside the cell and carries on rather than
@@ -148,7 +148,7 @@ works with a lamp or torch alone) is the next step.
 ## Harvesting
 
 Ask her to reap and she walks the field crop by crop, using Hytale's own harvest
-primitive rather than a break interaction - so a ripe crop gives exactly what the
+primitive rather than a break interaction, so a ripe crop gives exactly what the
 game would give you, and an Eternal crop is left standing to regrow.
 
 ```
@@ -182,17 +182,17 @@ details worth knowing:
   flower; a wild plant gives what the game gives. Nothing is invented.
 
 Say "gather everything around us" for a sweep of trunks, ore, rubble, wild
-mushrooms and non-crop plants - it deliberately skips your crops, sown seed blocks,
+mushrooms and non-crop plants. It deliberately skips your crops, sown seed blocks,
 leaves and bare terrain.
 
 ## In-game commands
 
-- `/laya` - the companion's own help, with an appearance-editor link.
-- `/laya hud on` / `/laya hud off` - show or hide her HUD card. The choice is
+- `/laya`: the companion's own help, with an appearance-editor link.
+- `/laya hud on` / `/laya hud off`: show or hide her HUD card. The choice is
   remembered across restarts until you turn it back on.
-- `/laya reset memory` - shows what she remembers (facts, conversation, and the
+- `/laya reset memory`: shows what she remembers (facts, conversation, and the
   recent things she watched you do) and how to clear it.
-- `/laya reset memory confirm` - clears all of that memory.
+- `/laya reset memory confirm`: clears all of that memory.
 
 ## Voice: Deepgram first
 
@@ -206,8 +206,8 @@ to the free/local options at any time in Settings.
 
 The other engines are backups:
 
-- **Edge TTS** - free online Microsoft voices, no local models.
-- **Kokoro** - local ONNX voice, fully offline once installed.
+- **Edge TTS**: free online Microsoft voices, no local models.
+- **Kokoro**: local ONNX voice, fully offline once installed.
 
 The roughly **1 GB Kokoro/Parakeet model download is optional**. You only need
 it for Kokoro TTS or local microphone speech recognition; Deepgram does not
@@ -222,10 +222,10 @@ need those models.
 - Python 3.11
 - A Windows Vulkan build of `laya.cpp` plus the `typed-decisions` checkpoint
 - Java 25 only if you build the plugin yourself
-- **Free Groq API key** - [create one here](https://console.groq.com/keys)
-- **Free z.ai API key** - [create one here](https://z.ai/manage-apikey/apikey)
-- **NanoGPT API key** - [create one here](https://nano-gpt.com/api) (paid; uncensored primary model)
-- **Deepgram API key** - [$200 starter credits here](https://console.deepgram.com/api-keys)
+- **Free Groq API key**: [create one here](https://console.groq.com/keys)
+- **Free z.ai API key**: [create one here](https://z.ai/manage-apikey/apikey)
+- **NanoGPT API key**: [create one here](https://nano-gpt.com/api) (paid; uncensored primary model)
+- **Deepgram API key**: [$200 starter credits here](https://console.deepgram.com/api-keys)
 - Optional: about 1 GB for Kokoro TTS and Parakeet local speech recognition
 
 Groq and z.ai are free to start; Deepgram includes $200 of starter credits,
@@ -292,17 +292,17 @@ Python AI bridge (ai-bridge/)
 Hytale world state, speech, actions
 ```
 
-- `hytale-plugin/` - Java plugin, UI, NPC controller, inventory, combat.
-- `ai-bridge/` - Python sidecar: speech, LLM, memory, vision, decisions, idle.
-- `ai-bridge/idlelogic.py` - idle-banter silence clock (unit-tested).
-- `ai-bridge/gearcheck.py` - gear-question matching for the inventory context.
-- `ai-bridge/farming.py` - farm, harvest and gather-request parsing: crop, count, area, seed kind.
+- `hytale-plugin/`: Java plugin, UI, NPC controller, inventory, combat.
+- `ai-bridge/`: Python sidecar: speech, LLM, memory, vision, decisions, idle.
+- `ai-bridge/idlelogic.py`: idle-banter silence clock (unit-tested).
+- `ai-bridge/gearcheck.py`: gear-question matching for the inventory context.
+- `ai-bridge/farming.py`: farm, harvest and gather-request parsing (crop, count, area, seed kind).
 
-- `ai-bridge/personalities.py` - personality trait layers.
-- `config/blocks.json` - player words to Hytale block names.
-- `config/hytale-knowledge.json` - compact game-knowledge reference.
-- `config/laya-persona.txt` - Laya's persona and response contract.
-- `dist/LayaPlugin-0.4.0.jar` - convenience plugin build.
+- `ai-bridge/personalities.py`: personality trait layers.
+- `config/blocks.json`: player words to Hytale block names.
+- `config/hytale-knowledge.json`: compact game-knowledge reference.
+- `config/laya-persona.txt`: Laya's persona and response contract.
+- `dist/LayaPlugin-0.4.0.jar`: convenience plugin build.
 
 ## Build the plugin
 
@@ -323,11 +323,11 @@ does not contain machine-specific paths.
 
 The web page at <http://127.0.0.1:8788> has two areas:
 
-- **Settings** - talk and teleport keys, **talk mode** (hold or toggle),
+- **Settings**: talk and teleport keys, **talk mode** (hold or toggle),
   **companion name**, voice engine and voices, audio devices, LLM models and API
   keys, and the **personality** dropdown (default, spicy, potty mouth, mean,
   flirty, depressed, military, unhinged).
-- **Laya Appearance Editor** - her full character-creator look, with real part
+- **Laya Appearance Editor**: her full character-creator look, with real part
   names and texture previews, applied live and saved.
 
 ## Next up
@@ -361,7 +361,7 @@ Hytale modding community. See each upstream project for its license.
 
 This project was **100% vibe coded** with
 [DeepSeek V4.1](https://www.deepseek.com/) and
-[OpenCode](https://opencode.ai/). Huge thanks to both - they made building
+[OpenCode](https://opencode.ai/). Huge thanks to both, they made building
 Laya an absolute joy.
 
 ### Inspiration
