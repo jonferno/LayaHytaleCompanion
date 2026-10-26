@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/banner.svg" alt="LayaHytaleCompanion banner" width="100%">
+  <img src="assets/banner.jpg" alt="Laya Hytale Companion banner" width="100%">
 </p>
 
 <h1 align="center">LayaHytaleCompanion</h1>

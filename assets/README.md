@@ -1,12 +1,14 @@
 # Assets
 
-`banner.svg` is the README banner. It is intentionally a source-editable SVG so
-you can replace it with your own artwork.
+`banner.jpg` is the README banner (1600 x 893, about 250 KB). The 2752 x 1536
+original is kept here as `readmebanner.jpg`; it is git-ignored so the repository
+stays small.
 
 ## Replacing the banner
 
-1. Make a banner around **1600 x 360** (or a 4.5:1 ratio).
-2. Save it as `assets/banner.png` or `assets/banner.svg`.
+1. Make a banner around **1600 px wide** (16:9 reads well at the top of the README).
+2. Save the full-size artwork as `assets/readmebanner.jpg`, then export a
+   web-sized **`assets/banner.jpg`** at 1600 px wide and roughly 85% quality.
 3. Update the image path at the top of `README.md`.
 4. In GitHub, open **Settings -> Social preview** and upload the same image for
    link previews.
