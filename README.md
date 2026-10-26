@@ -1,9 +1,6 @@
 <p align="center">
   <img src="assets/banner.jpg" alt="Laya Hytale Companion banner" width="100%">
 </p>
-
-<h1 align="center">LayaHytaleCompanion</h1>
-
 <p align="center">
   A 100% Free AI powered companion for Hytale: it follows, talks, remembers, mines,
   gathers, farms, harvests, and fights beside you.
