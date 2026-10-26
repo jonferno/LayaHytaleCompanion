@@ -32,25 +32,25 @@
   },
   "birch": {
    "patterns": [
-    "Wood_Birch"
+    "Wood_Birch|Leaves_Birch|Sapling_Birch"
    ],
    "label": "Birch"
   },
   "oak": {
    "patterns": [
-    "Wood_Oak"
+    "Wood_Oak|Leaves_Oak|Sapling_Oak"
    ],
    "label": "Oak"
   },
   "spruce": {
    "patterns": [
-    "Wood_Spruce"
+    "Wood_Spruce|Leaves_Spruce|Sapling_Spruce"
    ],
    "label": "Spruce"
   },
   "palm": {
    "patterns": [
-    "Wood_Palm"
+    "Wood_Palm|Leaves_Palm|Sapling_Palm"
    ],
    "label": "Palm"
   },
@@ -68,7 +68,7 @@
   },
   "wood": {
    "patterns": [
-    "^Wood_.*_Trunk(_Full)?$"
+    "^Wood_"
    ],
    "label": "Wood"
   },
@@ -1074,6 +1074,10 @@
    "name": "Debug Spawn Marker Block",
    "hint": null
   },
+  "Deco_Bat_Plush": {
+   "name": "[TMP] Bat Plushie",
+   "hint": null
+  },
   "Deco_Bone_Full": {
    "name": "Bone",
    "hint": null
@@ -1186,6 +1190,18 @@
    "name": "Halloween Pumpkin",
    "hint": null
   },
+  "Deco_Halloween_Pumpkin_Lamp_Green": {
+   "name": "[TMP] Pumpkin Green Lamp",
+   "hint": null
+  },
+  "Deco_Halloween_Pumpkin_Lamp_Orange": {
+   "name": "[TMP] Pumpkin Orange Lamp",
+   "hint": null
+  },
+  "Deco_Halloween_Pumpkin_Lamp_Yellow": {
+   "name": "[TMP] Pumpkin Yellow Lamp",
+   "hint": null
+  },
   "Deco_Halloween_Pumpkin_Scary": {
    "name": "Halloween Pumpkin",
    "hint": null
@@ -1235,7 +1251,7 @@
    "hint": null
   },
   "Deco_Lantern_Ceiling": {
-   "name": "Deco_Lantern_Ceiling",
+   "name": "Lantern",
    "hint": null
   },
   "Deco_Lever": {
@@ -1715,23 +1731,23 @@
    "hint": null
   },
   "Furniture_Bookshelf_Corner": {
-   "name": "Furniture_Bookshelf_Corner",
+   "name": "Prototype - Bookshelf - L Corner Single",
    "hint": null
   },
   "Furniture_Bookshelf_Left": {
-   "name": "Furniture_Bookshelf_Left",
+   "name": "Prototype - Bookshelf - Bottom Left Corner",
    "hint": null
   },
   "Furniture_Bookshelf_Middle": {
-   "name": "Furniture_Bookshelf_Middle",
+   "name": "Prototype - Bookshelf - Bottom Edge",
    "hint": null
   },
   "Furniture_Bookshelf_Right": {
-   "name": "Furniture_Bookshelf_Right",
+   "name": "Prototype - Bookshelf - Bottom Right Corner",
    "hint": null
   },
   "Furniture_Bookshelf_Single": {
-   "name": "Furniture_Bookshelf_Single",
+   "name": "Prototype - Bookshelf - Single",
    "hint": null
   },
   "Furniture_Castle_Bench": {
@@ -1759,7 +1775,7 @@
    "hint": null
   },
   "Furniture_Construction_Sign": {
-   "name": "Furniture_Construction_Sign",
+   "name": "Under Construction Sign",
    "hint": null
   },
   "Furniture_Crude_Bed": {
@@ -1919,7 +1935,7 @@
    "hint": null
   },
   "Furniture_Desert_Lantern_Ceiling": {
-   "name": "Furniture_Desert_Lantern_Ceiling",
+   "name": "Sandswept Lantern",
    "hint": null
   },
   "Furniture_Desert_Lantern_Tall": {
@@ -2071,7 +2087,7 @@
    "hint": null
   },
   "Furniture_Flag_Small_Red": {
-   "name": "Furniture_Flag_Small_Red",
+   "name": "Red Flag",
    "hint": null
   },
   "Furniture_Frozen_Castle_Bed": {
@@ -2159,7 +2175,7 @@
    "hint": null
   },
   "Furniture_Goblin_ChestStolen_Small": {
-   "name": "Furniture_Goblin_ChestStolen_Small",
+   "name": "Stolen Chest",
    "hint": null
   },
   "Furniture_Goblin_Chest_Large": {
@@ -2283,7 +2299,7 @@
    "hint": null
   },
   "Furniture_Human_Ruins_Lantern_Ceiling": {
-   "name": "Furniture_Human_Ruins_Lantern_Ceiling",
+   "name": "Lost Civilization Lantern",
    "hint": null
   },
   "Furniture_Human_Ruins_Planter": {
@@ -2455,7 +2471,7 @@
    "hint": null
   },
   "Furniture_Kweebec_Lantern_Ceiling": {
-   "name": "Furniture_Kweebec_Lantern_Ceiling",
+   "name": "Kweebec Lantern",
    "hint": null
   },
   "Furniture_Kweebec_Painting": {
@@ -2603,7 +2619,7 @@
    "hint": null
   },
   "Furniture_Royal_Magic_Potion_Glow_Ceiling": {
-   "name": "Furniture_Royal_Magic_Potion_Glow_Ceiling",
+   "name": "Glowing Royal Magic Potion",
    "hint": null
   },
   "Furniture_Royal_Magic_Table": {
@@ -2919,7 +2935,7 @@
    "hint": null
   },
   "Furniture_Temple_Light_Door_Medilum": {
-   "name": "Furniture_Temple_Light_Door_Medilum",
+   "name": "Medium Light Temple Door",
    "hint": null
   },
   "Furniture_Temple_Light_Ladder": {
@@ -2931,7 +2947,7 @@
    "hint": null
   },
   "Furniture_Temple_Light_Lantern_Ceiling": {
-   "name": "Furniture_Temple_Light_Lantern_Ceiling",
+   "name": "Light Temple Lantern",
    "hint": null
   },
   "Furniture_Temple_Light_Painting": {
@@ -3255,7 +3271,7 @@
    "hint": null
   },
   "GoblinLab_Generator": {
-   "name": "GoblinLab_Generator",
+   "name": "Goblin Power Generator",
    "hint": null
   },
   "GoblinLab_Teleporter": {
@@ -3263,7 +3279,7 @@
    "hint": null
   },
   "GoblinLab_Tinkering_Bench": {
-   "name": "GoblinLab_Tinkering_Bench",
+   "name": "Goblin Tinkerer's Workbench",
    "hint": null
   },
   "GoblinLab_Tinkering_Bench_Recipeset_A": {
@@ -3279,7 +3295,7 @@
    "hint": null
   },
   "Goblin_Breach_Portal": {
-   "name": "Goblin Breach",
+   "name": "Ancient Gateway",
    "hint": null
   },
   "Goblin_Gobliterator_Difficulty_Button": {
@@ -3823,7 +3839,7 @@
    "hint": null
   },
   "Metal_Iron_Gutter": {
-   "name": "Metal_Iron_Gutter",
+   "name": "Cybercity Iron Pipe - Long",
    "hint": null
   },
   "Metal_Iron_Half": {
@@ -4603,23 +4619,23 @@
    "hint": "plant"
   },
   "Plant_Crop_Apple_Block": {
-   "name": "Plant_Crop_Apple_Block",
+   "name": "Mature Apple",
    "hint": "plant"
   },
   "Plant_Crop_Apple_Block_Wall": {
-   "name": "Plant_Crop_Apple_Block_Wall",
+   "name": "Mature Apple",
    "hint": "plant"
   },
   "Plant_Crop_Aubergine_Block": {
-   "name": "Plant_Crop_Aubergine_Block",
+   "name": "Mature Aubergine",
    "hint": "plant"
   },
   "Plant_Crop_Aubergine_Block_Eternal": {
-   "name": "Plant_Crop_Aubergine_Block_Eternal",
+   "name": "Mature Aubergine",
    "hint": "plant"
   },
   "Plant_Crop_Aubergine_Item": {
-   "name": "Plant_Crop_Aubergine_Item",
+   "name": "Aubergine",
    "hint": "plant"
   },
   "Plant_Crop_Berry_Block": {
@@ -4627,71 +4643,71 @@
    "hint": "plant"
   },
   "Plant_Crop_Berry_Wet_Block": {
-   "name": "Plant_Crop_Berry_Wet_Block",
+   "name": "Wet Berry Bush",
    "hint": "plant"
   },
   "Plant_Crop_Berry_Winter_Block": {
-   "name": "Plant_Crop_Berry_Winter_Block",
+   "name": "Winter Berry Bush",
    "hint": "plant"
   },
   "Plant_Crop_Carrot_Block": {
-   "name": "Plant_Crop_Carrot_Block",
+   "name": "Mature Carrot",
    "hint": "plant"
   },
   "Plant_Crop_Carrot_Block_Eternal": {
-   "name": "Plant_Crop_Carrot_Block_Eternal",
+   "name": "Carrot",
    "hint": "plant"
   },
   "Plant_Crop_Carrot_Item": {
-   "name": "Plant_Crop_Carrot_Item",
+   "name": "Carrot",
    "hint": "plant"
   },
   "Plant_Crop_Cauliflower_Block": {
-   "name": "Plant_Crop_Cauliflower_Block",
+   "name": "Mature Cauliflower",
    "hint": "plant"
   },
   "Plant_Crop_Cauliflower_Block_Eternal": {
-   "name": "Plant_Crop_Cauliflower_Block_Eternal",
+   "name": "Mature Cauliflower",
    "hint": "plant"
   },
   "Plant_Crop_Cauliflower_Item": {
-   "name": "Plant_Crop_Cauliflower_Item",
+   "name": "Cauliflower",
    "hint": "plant"
   },
   "Plant_Crop_Chilli_Block": {
-   "name": "Plant_Crop_Chilli_Block",
+   "name": "Mature Chilli",
    "hint": "plant"
   },
   "Plant_Crop_Chilli_Block_Eternal": {
-   "name": "Plant_Crop_Chilli_Block_Eternal",
+   "name": "Mature Chilli",
    "hint": "plant"
   },
   "Plant_Crop_Chilli_Item": {
-   "name": "Plant_Crop_Chilli_Item",
+   "name": "Chilli",
    "hint": "plant"
   },
   "Plant_Crop_Corn_Block": {
-   "name": "Plant_Crop_Corn_Block",
+   "name": "Mature Corn",
    "hint": "plant"
   },
   "Plant_Crop_Corn_Block_Eternal": {
-   "name": "Plant_Crop_Corn_Block_Eternal",
+   "name": "Mature Corn",
    "hint": "plant"
   },
   "Plant_Crop_Corn_Item": {
-   "name": "Plant_Crop_Corn_Item",
+   "name": "Corn",
    "hint": "plant"
   },
   "Plant_Crop_Cotton_Block": {
-   "name": "Plant_Crop_Cotton_Block",
+   "name": "Mature Cotton",
    "hint": "plant"
   },
   "Plant_Crop_Cotton_Block_Eternal": {
-   "name": "Plant_Crop_Cotton_Block_Eternal",
+   "name": "Mature Cotton",
    "hint": "plant"
   },
   "Plant_Crop_Cotton_Item": {
-   "name": "Plant_Crop_Cotton_Item",
+   "name": "Cotton",
    "hint": "plant"
   },
   "Plant_Crop_Health1": {
@@ -4699,7 +4715,7 @@
    "hint": "plant"
   },
   "Plant_Crop_Health1_Block": {
-   "name": "Plant_Crop_Health1_Block",
+   "name": "Blood Rose Seeds",
    "hint": "plant"
   },
   "Plant_Crop_Health2": {
@@ -4707,7 +4723,7 @@
    "hint": "plant"
   },
   "Plant_Crop_Health2_Block": {
-   "name": "Plant_Crop_Health2_Block",
+   "name": "Bloodcap Spawn",
    "hint": "plant"
   },
   "Plant_Crop_Health3": {
@@ -4715,19 +4731,19 @@
    "hint": "plant"
   },
   "Plant_Crop_Health3_Block": {
-   "name": "Plant_Crop_Health3_Block",
+   "name": "Blood Leaf Seeds",
    "hint": "plant"
   },
   "Plant_Crop_Lettuce_Block": {
-   "name": "Plant_Crop_Lettuce_Block",
+   "name": "Mature Lettuce",
    "hint": "plant"
   },
   "Plant_Crop_Lettuce_Block_Eternal": {
-   "name": "Plant_Crop_Lettuce_Block_Eternal",
+   "name": "Mature Lettuce",
    "hint": "plant"
   },
   "Plant_Crop_Lettuce_Item": {
-   "name": "Plant_Crop_Lettuce_Item",
+   "name": "Lettuce",
    "hint": "plant"
   },
   "Plant_Crop_Mana1": {
@@ -4735,7 +4751,7 @@
    "hint": "plant"
   },
   "Plant_Crop_Mana1_Block": {
-   "name": "Plant_Crop_Mana1_Block",
+   "name": "Azure Fern Seeds",
    "hint": "plant"
   },
   "Plant_Crop_Mana2": {
@@ -4743,7 +4759,7 @@
    "hint": "plant"
   },
   "Plant_Crop_Mana2_Block": {
-   "name": "Plant_Crop_Mana2_Block",
+   "name": "Azurecap Spawn",
    "hint": "plant"
   },
   "Plant_Crop_Mana3": {
@@ -4751,11 +4767,11 @@
    "hint": "plant"
   },
   "Plant_Crop_Mana3_Block": {
-   "name": "Plant_Crop_Mana3_Block",
+   "name": "Azure Kelp Seeds",
    "hint": "plant"
   },
   "Plant_Crop_Mushroom_Block": {
-   "name": "Plant_Crop_Mushroom_Block",
+   "name": "Mushroom Spawn",
    "hint": "mushroom"
   },
   "Plant_Crop_Mushroom_Block_Blue": {
@@ -4911,7 +4927,7 @@
    "hint": "mushroom"
   },
   "Plant_Crop_Mushroom_Common_Lime_Large": {
-   "name": "Plant_Crop_Mushroom_Common_Lime_Large",
+   "name": "Puffy Green Common Mushroom",
    "hint": "mushroom"
   },
   "Plant_Crop_Mushroom_Flatcap_Blue": {
@@ -4959,51 +4975,51 @@
    "hint": "mushroom"
   },
   "Plant_Crop_Onion_Block": {
-   "name": "Plant_Crop_Onion_Block",
+   "name": "Mature Onions",
    "hint": "plant"
   },
   "Plant_Crop_Onion_Block_Eternal": {
-   "name": "Plant_Crop_Onion_Block_Eternal",
+   "name": "Mature Onions",
    "hint": "plant"
   },
   "Plant_Crop_Onion_Item": {
-   "name": "Plant_Crop_Onion_Item",
+   "name": "Onion",
    "hint": "plant"
   },
   "Plant_Crop_Potato_Block": {
-   "name": "Plant_Crop_Potato_Block",
+   "name": "Mature Potatoes",
    "hint": "plant"
   },
   "Plant_Crop_Potato_Block_Eternal": {
-   "name": "Plant_Crop_Potato_Block_Eternal",
+   "name": "Mature Potatoes",
    "hint": "plant"
   },
   "Plant_Crop_Potato_Item": {
-   "name": "Plant_Crop_Potato_Item",
+   "name": "Potato",
    "hint": "plant"
   },
   "Plant_Crop_Pumpkin_Block": {
-   "name": "Plant_Crop_Pumpkin_Block",
+   "name": "Mature Pumpkin",
    "hint": "plant"
   },
   "Plant_Crop_Pumpkin_Block_Eternal": {
-   "name": "Plant_Crop_Pumpkin_Block_Eternal",
+   "name": "Mature Pumpkin",
    "hint": "plant"
   },
   "Plant_Crop_Pumpkin_Item": {
-   "name": "Plant_Crop_Pumpkin_Item",
+   "name": "Pumpkin",
    "hint": "plant"
   },
   "Plant_Crop_Rice_Block": {
-   "name": "Plant_Crop_Rice_Block",
+   "name": "Mature Rice",
    "hint": "plant"
   },
   "Plant_Crop_Rice_Block_Eternal": {
-   "name": "Plant_Crop_Rice_Block_Eternal",
+   "name": "Mature Rice",
    "hint": "plant"
   },
   "Plant_Crop_Rice_Item": {
-   "name": "Plant_Crop_Rice_Item",
+   "name": "Rice",
    "hint": "plant"
   },
   "Plant_Crop_Stamina1": {
@@ -5011,7 +5027,7 @@
    "hint": "plant"
   },
   "Plant_Crop_Stamina1_Block": {
-   "name": "Plant_Crop_Stamina1_Block",
+   "name": "Storm Thistle Seeds",
    "hint": "plant"
   },
   "Plant_Crop_Stamina2": {
@@ -5019,7 +5035,7 @@
    "hint": "plant"
   },
   "Plant_Crop_Stamina2_Block": {
-   "name": "Plant_Crop_Stamina2_Block",
+   "name": "Stormcap Spawn",
    "hint": "plant"
   },
   "Plant_Crop_Stamina3": {
@@ -5027,43 +5043,43 @@
    "hint": "plant"
   },
   "Plant_Crop_Stamina3_Block": {
-   "name": "Plant_Crop_Stamina3_Block",
+   "name": "Storm Rush Seeds",
    "hint": "plant"
   },
   "Plant_Crop_Tomato_Block": {
-   "name": "Plant_Crop_Tomato_Block",
+   "name": "Mature Tomato",
    "hint": "plant"
   },
   "Plant_Crop_Tomato_Block_Eternal": {
-   "name": "Plant_Crop_Tomato_Block_Eternal",
+   "name": "Mature Tomato",
    "hint": "plant"
   },
   "Plant_Crop_Tomato_Item": {
-   "name": "Plant_Crop_Tomato_Item",
+   "name": "Tomato",
    "hint": "plant"
   },
   "Plant_Crop_Turnip_Block": {
-   "name": "Plant_Crop_Turnip_Block",
+   "name": "Mature Turnip",
    "hint": "plant"
   },
   "Plant_Crop_Turnip_Block_Eternal": {
-   "name": "Plant_Crop_Turnip_Block_Eternal",
+   "name": "Mature Turnip",
    "hint": "plant"
   },
   "Plant_Crop_Turnip_Item": {
-   "name": "Plant_Crop_Turnip_Item",
+   "name": "Turnip",
    "hint": "plant"
   },
   "Plant_Crop_Wheat_Block": {
-   "name": "Plant_Crop_Wheat_Block",
+   "name": "Mature Wheat",
    "hint": "plant"
   },
   "Plant_Crop_Wheat_Block_Eternal": {
-   "name": "Plant_Crop_Wheat_Block_Eternal",
+   "name": "Mature Wheat",
    "hint": "plant"
   },
   "Plant_Crop_Wheat_Item": {
-   "name": "Plant_Crop_Wheat_Item",
+   "name": "Wheat",
    "hint": "plant"
   },
   "Plant_Crop_Wheat_Stage_4_Burnt": {
@@ -5071,7 +5087,7 @@
    "hint": "plant"
   },
   "Plant_Crop_Wild_Grass_Block": {
-   "name": "Plant_Crop_Wild_Grass_Block",
+   "name": "Wild Grass Seeds",
    "hint": "plant"
   },
   "Plant_Fern": {
@@ -5103,7 +5119,7 @@
    "hint": "plant"
   },
   "Plant_Fern_Trunk": {
-   "name": "Fern Trunk",
+   "name": "Jungle Fern Trunk",
    "hint": "plant"
   },
   "Plant_Fern_Wet": {
@@ -5575,7 +5591,7 @@
    "hint": "plant"
   },
   "Plant_Lavender_Block": {
-   "name": "Plant_Lavender_Block",
+   "name": "Lavender Seeds",
    "hint": "plant"
   },
   "Plant_Lavender_Stage_0": {
@@ -6227,7 +6243,7 @@
    "hint": "plant"
   },
   "Plant_Sunflower_Block": {
-   "name": "Plant_Sunflower_Block",
+   "name": "Sunflower Seeds",
    "hint": "plant"
   },
   "Plant_Sunflower_Stage_0": {
@@ -6235,7 +6251,7 @@
    "hint": "plant"
   },
   "Plant_Test_Tree_Block": {
-   "name": "Plant_Test_Tree_Block",
+   "name": "Test Tree 0",
    "hint": "plant"
   },
   "Plant_Vine": {
@@ -6747,31 +6763,31 @@
    "hint": null
   },
   "Prototype_Rock_Ledge_Cobble_Pipe_Corner": {
-   "name": "Prototype_Rock_Ledge_Cobble_Pipe_Corner",
+   "name": "Ledgestone Cobble Pipe - Corner",
    "hint": null
   },
   "Prototype_Rock_Ledge_Cobble_Pipe_Long": {
-   "name": "Prototype_Rock_Ledge_Cobble_Pipe_Long",
+   "name": "Ledgestone Cobble Pipe - Long",
    "hint": null
   },
   "Prototype_Rock_Ledge_Cobble_Pipe_Short": {
-   "name": "Prototype_Rock_Ledge_Cobble_Pipe_Short",
+   "name": "Ledgestone Cobble Pipe - Short",
    "hint": null
   },
   "Prototype_Rock_Peach_Brick_Pipe_Corner": {
-   "name": "Prototype_Rock_Peach_Brick_Pipe_Corner",
+   "name": "Peachstone Brick Pipe - Corner",
    "hint": null
   },
   "Prototype_Rock_Peach_Brick_Pipe_Short": {
-   "name": "Prototype_Rock_Peach_Brick_Pipe_Short",
+   "name": "Peachstone Brick Pipe - Short",
    "hint": null
   },
   "Prototype_Rock_Peach_Cobble_Pipe_Corner": {
-   "name": "Prototype_Rock_Peach_Cobble_Pipe_Corner",
+   "name": "Peachstone Cobble Pipe - Corner",
    "hint": null
   },
   "Prototype_Rock_Peach_Cobble_Pipe_Short": {
-   "name": "Prototype_Rock_Peach_Cobble_Pipe_Short",
+   "name": "Peachstone Cobble Pipe - Short",
    "hint": null
   },
   "Prototype_Rock_Runic_Cobble_Pipe_Corner": {
@@ -6783,11 +6799,11 @@
    "hint": null
   },
   "Prototype_Rock_Runic_Dark_Brick_Pipe_Corner": {
-   "name": "Prototype_Rock_Runic_Dark_Brick_Pipe_Corner",
+   "name": "Dark Runic Brick Pipe - Corner",
    "hint": null
   },
   "Prototype_Rock_Runic_Dark_Brick_Pipe_Short": {
-   "name": "Prototype_Rock_Runic_Dark_Brick_Pipe_Short",
+   "name": "Dark Runic Brick Pipe - Short",
    "hint": null
   },
   "Prototype_Softwood_Roof_Gutter_Slope": {
@@ -7583,7 +7599,7 @@
    "hint": null
   },
   "Rock_Crystal_Blue_Block": {
-   "name": "Rock_Crystal_Blue_Block",
+   "name": "Blue Crystal",
    "hint": null
   },
   "Rock_Crystal_Blue_Large": {
@@ -7599,7 +7615,7 @@
    "hint": null
   },
   "Rock_Crystal_Cyan_Block": {
-   "name": "Rock_Crystal_Cyan_Block",
+   "name": "Cyan Crystal",
    "hint": null
   },
   "Rock_Crystal_Cyan_Large": {
@@ -7615,7 +7631,7 @@
    "hint": null
   },
   "Rock_Crystal_Green_Block": {
-   "name": "Rock_Crystal_Green_Block",
+   "name": "Green Crystal",
    "hint": null
   },
   "Rock_Crystal_Green_Large": {
@@ -7643,7 +7659,7 @@
    "hint": null
   },
   "Rock_Crystal_Pink_Block": {
-   "name": "Rock_Crystal_Pink_Block",
+   "name": "Pink Crystal",
    "hint": null
   },
   "Rock_Crystal_Pink_Large": {
@@ -7659,7 +7675,7 @@
    "hint": null
   },
   "Rock_Crystal_Purple_Block": {
-   "name": "Rock_Crystal_Purple_Block",
+   "name": "Purple Crystal",
    "hint": null
   },
   "Rock_Crystal_Purple_Large": {
@@ -7675,7 +7691,7 @@
    "hint": null
   },
   "Rock_Crystal_Red_Block": {
-   "name": "Rock_Crystal_Red_Block",
+   "name": "Red Crystal",
    "hint": null
   },
   "Rock_Crystal_Red_Large": {
@@ -7707,7 +7723,7 @@
    "hint": null
   },
   "Rock_Crystal_White_Block": {
-   "name": "Rock_Crystal_White_Block",
+   "name": "White Crystal",
    "hint": null
   },
   "Rock_Crystal_White_Large": {
@@ -7723,7 +7739,7 @@
    "hint": null
   },
   "Rock_Crystal_Yellow_Block": {
-   "name": "Rock_Crystal_Yellow_Block",
+   "name": "Yellow Crystal",
    "hint": null
   },
   "Rock_Crystal_Yellow_Large": {
@@ -7931,71 +7947,71 @@
    "hint": null
   },
   "Rock_Ledge_Brick": {
-   "name": "Rock_Ledge_Brick",
+   "name": "Ledgestone Brick",
    "hint": null
   },
   "Rock_Ledge_Brick_Beam": {
-   "name": "Rock_Ledge_Brick_Beam",
+   "name": "Ledgestone Brick - Beam",
    "hint": null
   },
   "Rock_Ledge_Brick_Decorative": {
-   "name": "Rock_Ledge_Brick_Decorative",
+   "name": "Ledgestone Brick - Decorative",
    "hint": null
   },
   "Rock_Ledge_Brick_Half": {
-   "name": "Rock_Ledge_Brick_Half",
+   "name": "Ledgestone Brick - Half Slab",
    "hint": null
   },
   "Rock_Ledge_Brick_Ornate": {
-   "name": "Rock_Ledge_Brick_Ornate",
+   "name": "Ledgestone Brick - Ornate",
    "hint": null
   },
   "Rock_Ledge_Brick_Pillar_Base": {
-   "name": "Rock_Ledge_Brick_Pillar_Base",
+   "name": "Ledgestone Brick Pillar - Base",
    "hint": null
   },
   "Rock_Ledge_Brick_Pillar_Middle": {
-   "name": "Rock_Ledge_Brick_Pillar_Middle",
+   "name": "Ledgestone Brick Pillar - Middle",
    "hint": null
   },
   "Rock_Ledge_Brick_Smooth": {
-   "name": "Rock_Ledge_Brick_Smooth",
+   "name": "Ledgestone Brick - Smooth",
    "hint": null
   },
   "Rock_Ledge_Brick_Smooth_Half": {
-   "name": "Rock_Ledge_Brick_Smooth_Half",
+   "name": "Ledgestone Brick - Smooth Half Slab",
    "hint": null
   },
   "Rock_Ledge_Brick_Stairs": {
-   "name": "Rock_Ledge_Brick_Stairs",
+   "name": "Ledgestone Brick - Stairs",
    "hint": null
   },
   "Rock_Ledge_Brick_Wall": {
-   "name": "Rock_Ledge_Brick_Wall",
+   "name": "Ledgestone Brick - Wall",
    "hint": null
   },
   "Rock_Ledge_Cobble": {
-   "name": "Rock_Ledge_Cobble",
+   "name": "Ledgestone Cobble",
    "hint": null
   },
   "Rock_Ledge_Cobble_Half": {
-   "name": "Rock_Ledge_Cobble_Half",
+   "name": "Ledgestone Cobble - Half Slab",
    "hint": null
   },
   "Rock_Ledge_Cobble_Pillar_Base": {
-   "name": "Rock_Ledge_Cobble_Pillar_Base",
+   "name": "Ledgestone Cobble Pillar - Base",
    "hint": null
   },
   "Rock_Ledge_Cobble_Pillar_Middle": {
-   "name": "Rock_Ledge_Cobble_Pillar_Middle",
+   "name": "Ledgestone Cobble Pillar - Middle",
    "hint": null
   },
   "Rock_Ledge_Cobble_Stairs": {
-   "name": "Rock_Ledge_Cobble_Stairs",
+   "name": "Ledgestone Cobble - Stairs",
    "hint": null
   },
   "Rock_Ledge_Cobble_Wall": {
-   "name": "Rock_Ledge_Cobble_Wall",
+   "name": "Ledgestone Cobble - Wall",
    "hint": null
   },
   "Rock_Lime": {
@@ -8007,115 +8023,115 @@
    "hint": null
   },
   "Rock_Lime_Brick": {
-   "name": "Rock_Lime_Brick",
+   "name": "Limestone Brick",
    "hint": null
   },
   "Rock_Lime_Brick_Beam": {
-   "name": "Rock_Lime_Brick_Beam",
+   "name": "Limestone Brick - Beam",
    "hint": null
   },
   "Rock_Lime_Brick_Decorative": {
-   "name": "Rock_Lime_Brick_Decorative",
+   "name": "Limestone Brick - Decorative",
    "hint": null
   },
   "Rock_Lime_Brick_Half": {
-   "name": "Rock_Lime_Brick_Half",
+   "name": "Limestone Brick - Half Slab",
    "hint": null
   },
   "Rock_Lime_Brick_Ornate": {
-   "name": "Rock_Lime_Brick_Ornate",
+   "name": "Limestone Brick - Ornate",
    "hint": null
   },
   "Rock_Lime_Brick_Pillar_Base": {
-   "name": "Rock_Lime_Brick_Pillar_Base",
+   "name": "Limestone Brick Pillar - Base",
    "hint": null
   },
   "Rock_Lime_Brick_Pillar_Middle": {
-   "name": "Rock_Lime_Brick_Pillar_Middle",
+   "name": "Limestone Brick Pillar - Middle",
    "hint": null
   },
   "Rock_Lime_Brick_Roof": {
-   "name": "Rock_Lime_Brick_Roof",
+   "name": "Limestone Brick Roof",
    "hint": null
   },
   "Rock_Lime_Brick_Roof_Flat": {
-   "name": "Rock_Lime_Brick_Roof_Flat",
+   "name": "Limestone Brick Roof - Flat",
    "hint": null
   },
   "Rock_Lime_Brick_Roof_Hollow": {
-   "name": "Rock_Lime_Brick_Roof_Hollow",
+   "name": "Limestone Brick Roof - Hollow",
    "hint": null
   },
   "Rock_Lime_Brick_Roof_Shallow": {
-   "name": "Rock_Lime_Brick_Roof_Shallow",
+   "name": "Limestone Brick Roof - Shallow",
    "hint": null
   },
   "Rock_Lime_Brick_Roof_Steep": {
-   "name": "Rock_Lime_Brick_Roof_Steep",
+   "name": "Limestone Brick Roof - Steep",
    "hint": null
   },
   "Rock_Lime_Brick_Smooth": {
-   "name": "Rock_Lime_Brick_Smooth",
+   "name": "Limestone Brick - Smooth",
    "hint": null
   },
   "Rock_Lime_Brick_Smooth_Half": {
-   "name": "Rock_Lime_Brick_Smooth_Half",
+   "name": "Limestone Brick - Smooth Half Slab",
    "hint": null
   },
   "Rock_Lime_Brick_Stairs": {
-   "name": "Rock_Lime_Brick_Stairs",
+   "name": "Limestone Brick - Stairs",
    "hint": null
   },
   "Rock_Lime_Brick_Wall": {
-   "name": "Rock_Lime_Brick_Wall",
+   "name": "Limestone Brick - Wall",
    "hint": null
   },
   "Rock_Lime_Cobble": {
-   "name": "Rock_Lime_Cobble",
+   "name": "Limestone Cobble",
    "hint": null
   },
   "Rock_Lime_Cobble_Beam": {
-   "name": "Rock_Lime_Cobble_Beam",
+   "name": "Limestone Cobble - Beam",
    "hint": null
   },
   "Rock_Lime_Cobble_Half": {
-   "name": "Rock_Lime_Cobble_Half",
+   "name": "Limestone Cobble - Half Slab",
    "hint": null
   },
   "Rock_Lime_Cobble_Pillar_Base": {
-   "name": "Rock_Lime_Cobble_Pillar_Base",
+   "name": "Limestone Cobble Pillar - Base",
    "hint": null
   },
   "Rock_Lime_Cobble_Pillar_Middle": {
-   "name": "Rock_Lime_Cobble_Pillar_Middle",
+   "name": "Limestone Cobble Pillar - Middle",
    "hint": null
   },
   "Rock_Lime_Cobble_Roof": {
-   "name": "Rock_Lime_Cobble_Roof",
+   "name": "Limestone Cobble Roof",
    "hint": null
   },
   "Rock_Lime_Cobble_Roof_Flat": {
-   "name": "Rock_Lime_Cobble_Roof_Flat",
+   "name": "Limestone Cobble Roof - Flat",
    "hint": null
   },
   "Rock_Lime_Cobble_Roof_Hollow": {
-   "name": "Rock_Lime_Cobble_Roof_Hollow",
+   "name": "Limestone Cobble Roof - Hollow",
    "hint": null
   },
   "Rock_Lime_Cobble_Roof_Shallow": {
-   "name": "Rock_Lime_Cobble_Roof_Shallow",
+   "name": "Limestone Cobble Roof - Shallow",
    "hint": null
   },
   "Rock_Lime_Cobble_Roof_Steep": {
-   "name": "Rock_Lime_Cobble_Roof_Steep",
+   "name": "Limestone Cobble Roof - Steep",
    "hint": null
   },
   "Rock_Lime_Cobble_Stairs": {
-   "name": "Rock_Lime_Cobble_Stairs",
+   "name": "Limestone Cobble - Stairs",
    "hint": null
   },
   "Rock_Lime_Cobble_Wall": {
-   "name": "Rock_Lime_Cobble_Wall",
+   "name": "Limestone Cobble - Wall",
    "hint": null
   },
   "Rock_Lime_Half": {
@@ -8391,59 +8407,59 @@
    "hint": null
   },
   "Rock_Peach_Brick": {
-   "name": "Rock_Peach_Brick",
+   "name": "Peachstone Brick",
    "hint": null
   },
   "Rock_Peach_Brick_Beam": {
-   "name": "Rock_Peach_Brick_Beam",
+   "name": "Peachstone Brick Pipe",
    "hint": null
   },
   "Rock_Peach_Brick_Half": {
-   "name": "Rock_Peach_Brick_Half",
+   "name": "Peachstone Brick - Half Slab",
    "hint": null
   },
   "Rock_Peach_Brick_Pillar_Base": {
-   "name": "Rock_Peach_Brick_Pillar_Base",
+   "name": "Peachstone Brick Pillar - Base",
    "hint": null
   },
   "Rock_Peach_Brick_Pillar_Middle": {
-   "name": "Rock_Peach_Brick_Pillar_Middle",
+   "name": "Peachstone Brick Pillar - Middle",
    "hint": null
   },
   "Rock_Peach_Brick_Stairs": {
-   "name": "Rock_Peach_Brick_Stairs",
+   "name": "Peachstone Brick - Stairs",
    "hint": null
   },
   "Rock_Peach_Brick_Wall": {
-   "name": "Rock_Peach_Brick_Wall",
+   "name": "Peachstone Brick - Wall",
    "hint": null
   },
   "Rock_Peach_Cobble": {
-   "name": "Rock_Peach_Cobble",
+   "name": "Peachstone Cobble",
    "hint": null
   },
   "Rock_Peach_Cobble_Beam": {
-   "name": "Rock_Peach_Cobble_Beam",
+   "name": "Peachstone Cobble Pipe",
    "hint": null
   },
   "Rock_Peach_Cobble_Half": {
-   "name": "Rock_Peach_Cobble_Half",
+   "name": "Peachstone Cobble - Half Slab",
    "hint": null
   },
   "Rock_Peach_Cobble_Pillar_Base": {
-   "name": "Rock_Peach_Cobble_Pillar_Base",
+   "name": "Peachstone Cobble Pillar - Base",
    "hint": null
   },
   "Rock_Peach_Cobble_Pillar_Middle": {
-   "name": "Rock_Peach_Cobble_Pillar_Middle",
+   "name": "Peachstone Cobble Pillar - Middle",
    "hint": null
   },
   "Rock_Peach_Cobble_Stairs": {
-   "name": "Rock_Peach_Cobble_Stairs",
+   "name": "Peachstone Cobble - Stairs",
    "hint": null
   },
   "Rock_Peach_Cobble_Wall": {
-   "name": "Rock_Peach_Cobble_Wall",
+   "name": "Peachstone Cobble - Wall",
    "hint": null
   },
   "Rock_Quartzite": {
@@ -8575,39 +8591,39 @@
    "hint": null
   },
   "Rock_Runic_Blue_Brick": {
-   "name": "Rock_Runic_Blue_Brick",
+   "name": "Blue Runic Brick",
    "hint": null
   },
   "Rock_Runic_Blue_Brick_Beam": {
-   "name": "Rock_Runic_Blue_Brick_Beam",
+   "name": "Blue Runic Brick - Beam",
    "hint": null
   },
   "Rock_Runic_Blue_Brick_Half": {
-   "name": "Rock_Runic_Blue_Brick_Half",
+   "name": "Blue Runic Brick - Half Slab",
    "hint": null
   },
   "Rock_Runic_Blue_Brick_Pillar_Base": {
-   "name": "Rock_Runic_Blue_Brick_Pillar_Base",
+   "name": "Blue Runic Brick Pillar - Base",
    "hint": null
   },
   "Rock_Runic_Blue_Brick_Pillar_Middle": {
-   "name": "Rock_Runic_Blue_Brick_Pillar_Middle",
+   "name": "Blue Runic Brick Pillar - Middle",
    "hint": null
   },
   "Rock_Runic_Blue_Brick_Pipe_Corner": {
-   "name": "Rock_Runic_Blue_Brick_Pipe_Corner",
+   "name": "Blue Runic Brick Pipe - Corner",
    "hint": null
   },
   "Rock_Runic_Blue_Brick_Pipe_Short": {
-   "name": "Rock_Runic_Blue_Brick_Pipe_Short",
+   "name": "Blue Runic Brick Pipe - Short",
    "hint": null
   },
   "Rock_Runic_Blue_Brick_Stairs": {
-   "name": "Rock_Runic_Blue_Brick_Stairs",
+   "name": "Blue Runic Brick - Stairs",
    "hint": null
   },
   "Rock_Runic_Blue_Brick_Wall": {
-   "name": "Rock_Runic_Blue_Brick_Wall",
+   "name": "Blue Runic Brick - Wall",
    "hint": null
   },
   "Rock_Runic_Brick": {
@@ -8655,67 +8671,67 @@
    "hint": null
   },
   "Rock_Runic_Dark_Brick": {
-   "name": "Rock_Runic_Dark_Brick",
+   "name": "Dark Runic Brick",
    "hint": null
   },
   "Rock_Runic_Dark_Brick_Beam": {
-   "name": "Rock_Runic_Dark_Brick_Beam",
+   "name": "Dark Runic Brick - Beam",
    "hint": null
   },
   "Rock_Runic_Dark_Brick_Half": {
-   "name": "Rock_Runic_Dark_Brick_Half",
+   "name": "Dark Runic Brick - Half Slab",
    "hint": null
   },
   "Rock_Runic_Dark_Brick_Pillar_Base": {
-   "name": "Rock_Runic_Dark_Brick_Pillar_Base",
+   "name": "Dark Runic Brick Pillar - Base",
    "hint": null
   },
   "Rock_Runic_Dark_Brick_Pillar_Middle": {
-   "name": "Rock_Runic_Dark_Brick_Pillar_Middle",
+   "name": "Dark Runic Brick Pillar - Middle",
    "hint": null
   },
   "Rock_Runic_Dark_Brick_Stairs": {
-   "name": "Rock_Runic_Dark_Brick_Stairs",
+   "name": "Dark Runic Brick - Stairs",
    "hint": null
   },
   "Rock_Runic_Dark_Brick_Wall": {
-   "name": "Rock_Runic_Dark_Brick_Wall",
+   "name": "Dark Runic Brick - Wall",
    "hint": null
   },
   "Rock_Runic_Teal_Brick": {
-   "name": "Rock_Runic_Teal_Brick",
+   "name": "Dark Blue Runic Brick",
    "hint": null
   },
   "Rock_Runic_Teal_Brick_Beam": {
-   "name": "Rock_Runic_Teal_Brick_Beam",
+   "name": "Dark Blue Runic Brick - Beam",
    "hint": null
   },
   "Rock_Runic_Teal_Brick_Half": {
-   "name": "Rock_Runic_Teal_Brick_Half",
+   "name": "Dark Blue Runic Brick - Half Slab",
    "hint": null
   },
   "Rock_Runic_Teal_Brick_Pillar_Base": {
-   "name": "Rock_Runic_Teal_Brick_Pillar_Base",
+   "name": "Dark Blue Runic Brick Pillar - Base",
    "hint": null
   },
   "Rock_Runic_Teal_Brick_Pillar_Middle": {
-   "name": "Rock_Runic_Teal_Brick_Pillar_Middle",
+   "name": "Dark Blue Runic Brick Pillar - Middle",
    "hint": null
   },
   "Rock_Runic_Teal_Brick_Pipe_Corner": {
-   "name": "Rock_Runic_Teal_Brick_Pipe_Corner",
+   "name": "Dark Blue Runic Brick Pipe - Corner",
    "hint": null
   },
   "Rock_Runic_Teal_Brick_Pipe_Short": {
-   "name": "Rock_Runic_Teal_Brick_Pipe_Short",
+   "name": "Dark Blue Runic Brick Pipe - Short",
    "hint": null
   },
   "Rock_Runic_Teal_Brick_Stairs": {
-   "name": "Rock_Runic_Teal_Brick_Stairs",
+   "name": "Dark Blue Runic Brick - Stairs",
    "hint": null
   },
   "Rock_Runic_Teal_Brick_Wall": {
-   "name": "Rock_Runic_Teal_Brick_Wall",
+   "name": "Dark Blue Runic Brick - Wall",
    "hint": null
   },
   "Rock_Salt": {
@@ -9368,7 +9384,7 @@
   },
   "Rock_Stone": {
    "name": "Stone",
-   "hint": null
+   "hint": "stone"
   },
   "Rock_Stone_Aqua": {
    "name": "Aqua Stone",
@@ -9384,123 +9400,123 @@
   },
   "Rock_Stone_Brick": {
    "name": "Stone Brick",
-   "hint": null
+   "hint": "stone brick"
   },
   "Rock_Stone_Brick_Beam": {
    "name": "Stone Brick - Beam",
-   "hint": null
+   "hint": "stone brick"
   },
   "Rock_Stone_Brick_Decorative": {
    "name": "Stone Brick - Decorative",
-   "hint": null
+   "hint": "stone brick"
   },
   "Rock_Stone_Brick_Half": {
    "name": "Stone Brick - Half Slab",
-   "hint": null
+   "hint": "stone brick"
   },
   "Rock_Stone_Brick_Mossy": {
    "name": "Stone Brick - Mossy",
-   "hint": null
+   "hint": "stone brick"
   },
   "Rock_Stone_Brick_Ornate": {
    "name": "Stone Brick - Ornate",
-   "hint": null
+   "hint": "stone brick"
   },
   "Rock_Stone_Brick_Pillar_Base": {
    "name": "Stone Brick Pillar - Base",
-   "hint": null
+   "hint": "stone brick"
   },
   "Rock_Stone_Brick_Pillar_Middle": {
    "name": "Stone Brick Pillar - Middle",
-   "hint": null
+   "hint": "stone brick"
   },
   "Rock_Stone_Brick_Roof": {
    "name": "Stone Brick Roof",
-   "hint": null
+   "hint": "stone brick"
   },
   "Rock_Stone_Brick_Roof_Flat": {
    "name": "Stone Brick Roof - Flat",
-   "hint": null
+   "hint": "stone brick"
   },
   "Rock_Stone_Brick_Roof_Hollow": {
    "name": "Stone Brick Roof - Hollow",
-   "hint": null
+   "hint": "stone brick"
   },
   "Rock_Stone_Brick_Roof_Shallow": {
    "name": "Stone Brick Roof - Shallow",
-   "hint": null
+   "hint": "stone brick"
   },
   "Rock_Stone_Brick_Roof_Steep": {
    "name": "Stone Brick Roof - Steep",
-   "hint": null
+   "hint": "stone brick"
   },
   "Rock_Stone_Brick_Smooth": {
    "name": "Stone Brick - Smooth",
-   "hint": null
+   "hint": "stone brick"
   },
   "Rock_Stone_Brick_Smooth_Half": {
    "name": "Stone Brick - Smooth Half Slab",
-   "hint": null
+   "hint": "stone brick"
   },
   "Rock_Stone_Brick_Stairs": {
    "name": "Stone Brick - Stairs",
-   "hint": null
+   "hint": "stone brick"
   },
   "Rock_Stone_Brick_Wall": {
    "name": "Stone Brick - Wall",
-   "hint": null
+   "hint": "stone brick"
   },
   "Rock_Stone_Cobble": {
    "name": "Cobblestone",
-   "hint": null
+   "hint": "cobblestone"
   },
   "Rock_Stone_Cobble_Beam": {
    "name": "Cobblestone - Beam",
-   "hint": null
+   "hint": "cobblestone"
   },
   "Rock_Stone_Cobble_Corner": {
    "name": "Cobblestone - Corner",
-   "hint": null
+   "hint": "cobblestone"
   },
   "Rock_Stone_Cobble_Half": {
    "name": "Cobblestone - Half Slab",
-   "hint": null
+   "hint": "cobblestone"
   },
   "Rock_Stone_Cobble_Mossy": {
    "name": "Mossy Cobblestone",
-   "hint": null
+   "hint": "cobblestone"
   },
   "Rock_Stone_Cobble_Mossy_Half": {
    "name": "Mossy Cobblestone - Half Slab",
-   "hint": null
+   "hint": "cobblestone"
   },
   "Rock_Stone_Cobble_Roof": {
    "name": "Cobblestone Roof",
-   "hint": null
+   "hint": "cobblestone"
   },
   "Rock_Stone_Cobble_Roof_Flat": {
    "name": "Cobblestone Roof - Flat",
-   "hint": null
+   "hint": "cobblestone"
   },
   "Rock_Stone_Cobble_Roof_Hollow": {
    "name": "Cobblestone Roof - Hollow",
-   "hint": null
+   "hint": "cobblestone"
   },
   "Rock_Stone_Cobble_Roof_Shallow": {
    "name": "Cobblestone Roof - Shallow",
-   "hint": null
+   "hint": "cobblestone"
   },
   "Rock_Stone_Cobble_Roof_Steep": {
    "name": "Cobblestone Roof - Steep",
-   "hint": null
+   "hint": "cobblestone"
   },
   "Rock_Stone_Cobble_Stairs": {
    "name": "Cobblestone - Stairs",
-   "hint": null
+   "hint": "cobblestone"
   },
   "Rock_Stone_Cobble_Wall": {
    "name": "Cobblestone - Wall",
-   "hint": null
+   "hint": "cobblestone"
   },
   "Rock_Stone_Half": {
    "name": "Stone - Half Slab",
@@ -9635,7 +9651,7 @@
    "hint": null
   },
   "Rock_Volcanic_Cracked_Incandescent": {
-   "name": "Rock_Volcanic_Cracked_Incandescent",
+   "name": "Incandescent Volcanic Rock",
    "hint": null
   },
   "Rock_Volcanic_Cracked_Lava": {
@@ -9664,147 +9680,147 @@
   },
   "Rubble_Aqua": {
    "name": "Aqua Rubble",
-   "hint": null
+   "hint": "rubble"
   },
   "Rubble_Aqua_Medium": {
    "name": "Aqua Rubble - Medium",
-   "hint": null
+   "hint": "rubble"
   },
   "Rubble_Basalt": {
    "name": "Basalt Rubble",
-   "hint": null
+   "hint": "rubble"
   },
   "Rubble_Basalt_Medium": {
    "name": "Basalt Rubble - Medium",
-   "hint": null
+   "hint": "rubble"
   },
   "Rubble_Calcite": {
    "name": "Calcite Rubble",
-   "hint": null
+   "hint": "rubble"
   },
   "Rubble_Calcite_Medium": {
    "name": "Calcite Rubble - Medium",
-   "hint": null
+   "hint": "rubble"
   },
   "Rubble_Chalk": {
    "name": "Chalk Rubble",
-   "hint": null
+   "hint": "rubble"
   },
   "Rubble_Chalk_Medium": {
    "name": "Chalk Rubble - Medium",
-   "hint": null
+   "hint": "rubble"
   },
   "Rubble_Dawnstone": {
    "name": "Dawnstone Rubble",
-   "hint": null
+   "hint": "rubble"
   },
   "Rubble_Dawnstone_Medium": {
    "name": "Dawnstone Rubble - Medium",
-   "hint": null
+   "hint": "rubble"
   },
   "Rubble_Ice": {
    "name": "Ice Chunks",
-   "hint": null
+   "hint": "rubble"
   },
   "Rubble_Ice_Medium": {
    "name": "Ice Chunks - Medium",
-   "hint": null
+   "hint": "rubble"
   },
   "Rubble_Lime": {
    "name": "Limestone Rubble",
-   "hint": null
+   "hint": "rubble"
   },
   "Rubble_Lime_Medium": {
    "name": "Limestone Rubble - Medium",
-   "hint": null
+   "hint": "rubble"
   },
   "Rubble_Magma_Cooled": {
    "name": "Cooled Magma Rubble",
-   "hint": null
+   "hint": "rubble"
   },
   "Rubble_Magma_Cooled_Medium": {
    "name": "Cooled Magma Rubble - Medium",
-   "hint": null
+   "hint": "rubble"
   },
   "Rubble_Marble": {
    "name": "Marble Rubble",
-   "hint": null
+   "hint": "rubble"
   },
   "Rubble_Marble_Medium": {
    "name": "Marble Rubble - Medium",
-   "hint": null
+   "hint": "rubble"
   },
   "Rubble_Quartzite": {
    "name": "Quartzite Rubble",
-   "hint": null
+   "hint": "rubble"
   },
   "Rubble_Quartzite_Medium": {
    "name": "Quartzite Rubble - Medium",
-   "hint": null
+   "hint": "rubble"
   },
   "Rubble_Sandstone": {
    "name": "Sandstone Rubble",
-   "hint": null
+   "hint": "rubble"
   },
   "Rubble_Sandstone_Medium": {
    "name": "Sandstone Rubble - Medium",
-   "hint": null
+   "hint": "rubble"
   },
   "Rubble_Sandstone_Red": {
    "name": "Red Sandstone Rubble",
-   "hint": null
+   "hint": "rubble"
   },
   "Rubble_Sandstone_Red_Medium": {
    "name": "Red Sandstone Rubble - Medium",
-   "hint": null
+   "hint": "rubble"
   },
   "Rubble_Sandstone_White": {
    "name": "White Sandstone Rubble",
-   "hint": null
+   "hint": "rubble"
   },
   "Rubble_Sandstone_White_Medium": {
    "name": "White Sandstone Rubble - Medium",
-   "hint": null
+   "hint": "rubble"
   },
   "Rubble_Shale": {
    "name": "Shale Rubble",
-   "hint": null
+   "hint": "rubble"
   },
   "Rubble_Shale_Medium": {
    "name": "Shale Rubble - Medium",
-   "hint": null
+   "hint": "rubble"
   },
   "Rubble_Slate": {
    "name": "Slate Rubble",
-   "hint": null
+   "hint": "rubble"
   },
   "Rubble_Slate_Medium": {
    "name": "Slate Rubble - Medium",
-   "hint": null
+   "hint": "rubble"
   },
   "Rubble_Stone": {
    "name": "Stone Rubble",
-   "hint": null
+   "hint": "stone rubble"
   },
   "Rubble_Stone_Medium": {
    "name": "Stone Rubble - Medium",
-   "hint": null
+   "hint": "stone rubble"
   },
   "Rubble_Stone_Mossy": {
    "name": "Mossy Stone Rubble",
-   "hint": null
+   "hint": "stone rubble"
   },
   "Rubble_Stone_Mossy_Medium": {
    "name": "Mossy Stone Rubble - Medium",
-   "hint": null
+   "hint": "stone rubble"
   },
   "Rubble_Volcanic": {
    "name": "Volcanic Rubble",
-   "hint": null
+   "hint": "rubble"
   },
   "Rubble_Volcanic_Medium": {
    "name": "Volcanic Rubble - Medium",
-   "hint": null
+   "hint": "rubble"
   },
   "Scrap_Hook": {
    "name": "Hook Anchor",
@@ -10619,15 +10635,15 @@
    "hint": null
   },
   "Spawn_Butterfly": {
-   "name": "Spawn_Butterfly",
+   "name": "Butterfly Spawner",
    "hint": null
   },
   "Spawn_Goblin_Breach_Sparks": {
-   "name": "Spawn_Goblin_Breach_Sparks",
+   "name": "Goblin Breach Spark Spawner",
    "hint": null
   },
   "Spawn_Goblin_Initial_Breach_Marker": {
-   "name": "Spawn_Goblin_Initial_Breach_Marker",
+   "name": "Goblin Initial Breach Map Marker",
    "hint": null
   },
   "Spawn_Portal": {
@@ -10635,27 +10651,27 @@
    "hint": null
   },
   "Spawn_TempleLeaves": {
-   "name": "Spawn_TempleLeaves",
+   "name": "Leaf Spawner",
    "hint": null
   },
   "Spawn_TempleLeaves_Small": {
-   "name": "Spawn_TempleLeaves_Small",
+   "name": "Small Leaf Spawner",
    "hint": null
   },
   "Spawn_Temple_Circle": {
-   "name": "Spawn_Temple_Circle",
+   "name": "Circle Spawner",
    "hint": null
   },
   "Spawn_Temple_Circle_Flipped": {
-   "name": "Spawn_Temple_Circle_Flipped",
+   "name": "Flipped Small Circle Spawner",
    "hint": null
   },
   "Spawn_Temple_Circle_Small": {
-   "name": "Spawn_Temple_Circle_Small",
+   "name": "Small Circle Spawner",
    "hint": null
   },
   "Spawn_Temple_Goblin_Explosion": {
-   "name": "Spawn_Temple_Goblin_Explosion",
+   "name": "Goblin Explosion Spawner",
    "hint": null
   },
   "Spawn_Temple_Goblin_Fence": {
@@ -10663,51 +10679,51 @@
    "hint": null
   },
   "Spawn_Temple_Goblin_Fireworks": {
-   "name": "Spawn_Temple_Goblin_Fireworks",
+   "name": "Goblin Firework Spawner",
    "hint": null
   },
   "Spawn_Temple_Goblin_FireworksCloser": {
-   "name": "Spawn_Temple_Goblin_FireworksCloser",
+   "name": "Goblin Firework Closer Spawner",
    "hint": null
   },
   "Spawn_Temple_Goblin_Geyser": {
-   "name": "Spawn_Temple_Goblin_Geyser",
+   "name": "Goblin Geyser Spawner",
    "hint": null
   },
   "Spawn_Temple_Goblin_Lightning": {
-   "name": "Spawn_Temple_Goblin_Lightning",
+   "name": "Goblin Lightning Spawner",
    "hint": null
   },
   "Spawn_Temple_Goblin_Sludge": {
-   "name": "Spawn_Temple_Goblin_Sludge",
+   "name": "Goblin Sludge Spawner",
    "hint": null
   },
   "Spawn_Temple_Goblin_Sludge2": {
-   "name": "Spawn_Temple_Goblin_Sludge2",
+   "name": "Goblin Sludge Spawner 2",
    "hint": null
   },
   "Spawn_Temple_Goblin_Smoke": {
-   "name": "Spawn_Temple_Goblin_Smoke",
+   "name": "Goblin Smoke Spawner",
    "hint": null
   },
   "Spawn_Temple_Goblin_Sparks": {
-   "name": "Spawn_Temple_Goblin_Sparks",
+   "name": "Goblin Sparks Spawner",
    "hint": null
   },
   "Spawn_Temple_Goblin_SparksBurst": {
-   "name": "Spawn_Temple_Goblin_SparksBurst",
+   "name": "Goblin Sparks Burst Spawner",
    "hint": null
   },
   "Spawn_Temple_Helix": {
-   "name": "Spawn_Temple_Helix",
+   "name": "Helix Spawner",
    "hint": null
   },
   "Spawn_Temple_RoofSparks": {
-   "name": "Spawn_Temple_RoofSparks",
+   "name": "Spark Spawner",
    "hint": null
   },
   "Spawn_Wind": {
-   "name": "Spawn_Wind",
+   "name": "Wind Spawner",
    "hint": null
   },
   "Spawner_Rat": {
@@ -10719,7 +10735,7 @@
    "hint": null
   },
   "Stalactite_Smoke_Floor": {
-   "name": "Stalactite_Smoke_Floor",
+   "name": "Stone Stalactite - Small",
    "hint": null
   },
   "Survival_Trap_Grass": {
@@ -10751,11 +10767,11 @@
    "hint": null
   },
   "Template_Crop_Block": {
-   "name": "Template_Crop_Block",
+   "name": "Template Crop",
    "hint": null
   },
   "Template_Crop_Item": {
-   "name": "Template_Crop_Item",
+   "name": "Template Crop",
    "hint": null
   },
   "Template_Food": {
@@ -10791,7 +10807,7 @@
    "hint": null
   },
   "Template_Tool_Watering_Can": {
-   "name": "Template_Tool_Watering_Can",
+   "name": "Empty Watering Can",
    "hint": null
   },
   "Test_All_Rotation": {

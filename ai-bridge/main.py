@@ -34,7 +34,8 @@ from pydantic import BaseModel
 from stance import stance_intent, stance_ack, STANCE_ACKS
 from gearcheck import asks_about_gear
 from farming import (detect_farm, farm_ack, seed_kind, is_kind_answer,
-                     count_from_message)
+                     count_from_message, detect_harvest, wants_no_replant,
+                     harvest_ack, harvest_radius)
 from idlelogic import should_fire, idle_gap_ms
 import memreset
 from personalities import PERSONALITIES, personality_layer, DEFAULT_PERSONALITY
@@ -1906,14 +1907,44 @@ def derive_task_radius(message: str, task: str, hint: str, count: int) -> int:
     text = (message or "").lower()
     m = re.search(r"(\d{1,3})\s*[x?]\s*(\d{1,3})", text)
     if m:
-        return max(4, min(32, int(round(max(int(m.group(1)), int(m.group(2))) / 2.0))))
+        return max(4, min(50, int(round(max(int(m.group(1)), int(m.group(2))) / 2.0))))
     m = re.search(r"(\d{1,3})\s*(?:block|blocks)?\s*radius", text)
     if m:
-        return max(4, min(32, int(m.group(1))))
+        return max(4, min(50, int(m.group(1))))
     m = re.search(r"(\d{1,3})\s*(?:block|blocks)\s*(?:around|area)", text)
     if m:
-        return max(4, min(32, int(m.group(1))))
+        return max(4, min(50, int(m.group(1))))
+    m = re.search(r"(?:within|in)\s+(?:a\s+|an\s+)?(\d{1,3})\s*(?:block|blocks)\b", text)
+    if m:
+        return max(4, min(50, int(m.group(1))))
     return 0
+
+
+# "gather everything you can find" has no noun to match against: the hint is filler.
+# The plugin understands the literal word "everything" as "any gatherable resource".
+_ANY_NOUNS = frozenset({"everything", "anything", "whatever", "all", "stuff",
+                        "things", "resources", "gatherables"})
+_HINT_FILLER = frozenset({"you", "can", "could", "find", "around", "us", "here",
+                          "nearby", "else", "the", "a", "an", "i", "we", "of", "it",
+                          "that", "this", "and", "in", "on", "for", "me", "some",
+                          "any", "possible", "what", "gather", "collect", "pick"})
+
+
+def normalize_gather_hint(hint: str) -> str:
+    """'everything you can' / 'all the stuff' -> 'everything'; real nouns pass through.
+
+    Only a hint made ENTIRELY of filler words becomes the any-resource sentinel, so
+    "all the sunflowers" keeps its crop and "everything copper" would keep copper.
+    """
+    h = (hint or "").strip().lower()
+    if not h:
+        return ""
+    words = re.findall(r"[a-z]+", h)
+    if not words:
+        return ""
+    if set(words) & _ANY_NOUNS and all(w in _ANY_NOUNS or w in _HINT_FILLER for w in words):
+        return "everything"
+    return h
 
 
 def derive_task_scope(message: str, task: str, hint: str, count: int):
@@ -1999,6 +2030,13 @@ def task_ack(task: str, hint: str, scope, count: int) -> str:
             f"On it - I'll get that {h or 'ore'}.",
         ])
     if task == "gather":
+        if h in ("everything", "anything"):
+            return _pick_ack([
+                "On it - I'll clear what I can around here.",
+                "Right - everything I can grab, then.",
+                "Gathering - whatever's gatherable nearby.",
+                "I'll sweep the area for anything worth taking.",
+            ])
         return _pick_ack([
             f"On it - I'll gather the {h or 'plants'} around here.",
             f"I'll collect the local {h or 'plants'}.",
@@ -3118,23 +3156,35 @@ async def run_chat(player: str, message: str, state: dict, with_audio: bool,
         # leg (stop-task ordering for non-fast messages is unchanged below).
         det_task = None
         det_farm = False
+        det_harvest = False
         farm_count = 0
         farm_kind = ""
+        harvest_count = 0
         if not fast and wants_stop_task(message):
             log("Guard: stop-task cue -> action=stop_task")
             action = "stop_task"
             task = ""
             target_hint = ""
         else:
-            # Farming is checked FIRST: "plant"/"hoe" must never fall through to
-            # the mine/gather grammar, which would read "plant some seeds" as a
-            # gather job for the resource "seeds".
+            # Harvest and farm are both checked BEFORE the mine/gather grammar, or
+            # "pick the carrots" / "plant some seeds" become gather jobs for the
+            # resources "carrots" / "seeds". Harvest goes first because a reap is
+            # never also a planting job.
             global _PENDING_FARM
-            is_farm, farm_count, farm_hint = detect_farm(message)
+            is_harvest, harvest_count, harvest_hint = detect_harvest(message)
+            if is_harvest:
+                if task != "harvest" or target_hint != harvest_hint:
+                    log(f"Guard: deterministic harvest intent -> "
+                        f"count={harvest_count or 'all'} crop={harvest_hint or 'any'}")
+                task = "harvest"
+                target_hint = harvest_hint or ""
+                det_harvest = True
+            # A reap is not a planting job: never let both legs claim the same message.
+            is_farm, farm_count, farm_hint = (False, 0, "") if is_harvest else detect_farm(message)
             # A bare answer to her own "which ones should I plant?" has no farm verb, so
             # rebuild the pending task and let the named kind settle it (measured
             # 2026-10-25: she asked three times because the answer carried no intent).
-            if not is_farm and _PENDING_FARM and is_kind_answer(message):
+            if not is_farm and not is_harvest and _PENDING_FARM and is_kind_answer(message):
                 task = "farm"
                 target_hint = _PENDING_FARM.get("hint", "") or ""
                 farm_count = int(_PENDING_FARM.get("count", 0) or 0)
@@ -3152,7 +3202,9 @@ async def run_chat(player: str, message: str, state: dict, with_audio: bool,
                 task = "farm"
                 if farm_hint:
                     target_hint = farm_hint        # never wipe a pending answer's crop
-            else:
+            elif not is_harvest:
+                # A reap never reaches the mine/gather grammar ("harvest the carrots"
+                # would otherwise be read as a gather job for "carrots").
                 det_task, det_hint = detect_task(message)
                 if det_task:
                     # The raw text is authoritative: a stale-memory refusal or a
@@ -3166,15 +3218,27 @@ async def run_chat(player: str, message: str, state: dict, with_audio: bool,
                 and target_hint.lower() in WOOD_SPECIES
                 and re.search(r"\b(trees?|wood|logs?|chop|cut|fell)\b", (message or "").lower())):
             target_hint = "wood"
+        if task == "gather":
+            # "gather everything you can find" -> the hint is filler, not a noun.
+            # Mining keeps its own nouns: "mine everything" has no sensible block set.
+            target_hint = normalize_gather_hint(target_hint)
         # Only a MODEL task is cleared here: a deterministic farm/mine/gather task
         # was read from an imperative request, so a creature mention elsewhere in
         # the same sentence must not silently cancel it.
-        if task and not det_task and not det_farm and is_creature_attack(message):
+        if task and not det_task and not det_farm and not det_harvest and is_creature_attack(message):
             log(f"Guard: creature attack clears model task '{task}'")
             task = ""
             target_hint = ""
+        # A harvest request carries its own cell count: 0 means "every ripe crop in range".
+        if task == "harvest":
+            count = harvest_count
+            if not count and model_count:
+                try:
+                    count = max(0, min(int(model_count), 100))
+                except (TypeError, ValueError):
+                    pass
         # A farm request carries its own seed count: 0 means "every seed she has".
-        if task == "farm":
+        elif task == "farm":
             # The model can raise a farm task from a bare "just seed"; without this the
             # wire count would be 0 = "every seed she owns".
             if not farm_count:
@@ -3195,7 +3259,16 @@ async def run_chat(player: str, message: str, state: dict, with_audio: bool,
             global _LAST_FARM
             scope = (farm_kind or seed_kind(message)) or None
             _LAST_FARM = {"hint": target_hint or "", "count": count}
+        if task == "harvest":
+            # Harvest reuses `scope` for the REPLANT choice: on by default (the player
+            # has to say "leave it bare" to turn it off), same one-existing-field trick
+            # the seed kind uses.
+            scope = "noreplant" if wants_no_replant(message) else None
         radius = derive_task_radius(message, task, target_hint, count)
+        if task == "harvest":
+            # "harvest all in 100x100" / "in 50x500" / "within 40 blocks" -> scan radius.
+            # 0 leaves the plugin's default (16).
+            radius = harvest_radius(message)
         if task in ("mine", "gather"):
             log(f"Task intent: {task} hint={target_hint or '?'} count={count if count else 'all'}"
                 f" scope={scope or '-'} radius={radius or 'default'}")
@@ -3212,6 +3285,14 @@ async def run_chat(player: str, message: str, state: dict, with_audio: bool,
             ack = farm_ack(count, target_hint)
             if (say_line or "").strip() != ack:
                 log(f"Guard: farm ack replaces model line -> {ack}")
+            say_line = ack
+        elif task == "harvest":
+            log(f"Task intent: harvest crop={target_hint or 'any'} "
+                f"count={count or 'all'} replant={'no' if scope == 'noreplant' else 'yes'} "
+                f"radius={radius or 'default'}")
+            ack = harvest_ack(count, target_hint)
+            if (say_line or "").strip() != ack:
+                log(f"Guard: harvest ack replaces model line -> {ack}")
             say_line = ack
 
         # "Wield/switch to your battleaxe" is an equipment order even without the

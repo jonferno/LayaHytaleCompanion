@@ -4,13 +4,13 @@ Group {
   LayoutMode: CenterMiddle;
 
   Group #Panel {
-    Anchor: (Width: 1230, Height: 420);
+    Anchor: (Width: 1192, Height: 420);
     Background: #345068(0.97);
     Padding: (Full: 3);
     LayoutMode: Left;
 
     Group #Inner {
-      Anchor: (Width: 1224, Height: 414);
+      Anchor: (Width: 1186, Height: 414);
       Background: #303F53(0.96);
       Padding: (Full: 14);
       LayoutMode: Top;

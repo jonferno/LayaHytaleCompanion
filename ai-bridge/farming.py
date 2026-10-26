@@ -75,6 +75,32 @@ _ALL_CUES = ("any", "all", "everything", "as many", "as much", "whatever",
 # and the plan cannot disagree.
 MAX_COUNT = 400        # a stack is 100; she can plant from several stacks
 
+# --- Harvesting (2026-10-26) ---------------------------------------------------
+# A harvest request is the mirror of a farm request: same refusal grammar, but the
+# verb decides whether the engine should reap instead of plant. "harvest"/"reap" are
+# unambiguous; "pick"/"collect" are ordinary English verbs, so they only start a job
+# when something crop-shaped is in the sentence ("pick up the sword" is not a job).
+HARVEST_VERBS = frozenset({
+    "harvest", "harvests", "harvesting",
+    "reap", "reaps", "reaping",
+    "pick", "picks", "picking",
+    "collect", "collects", "collecting",
+})
+_STRONG_HARVEST_VERBS = frozenset({
+    "harvest", "harvests", "harvesting", "reap", "reaps", "reaping",
+})
+# Enough context for a weak verb to be a crop job rather than a coincidence.
+_HARVEST_CONTEXT = frozenset({
+    "crop", "crops", "produce", "vegetable", "vegetables", "farm", "field",
+    "fields", "garden", "patch", "plot", "ripe", "ready", "everything",
+}) | _CROP_WORDS
+
+# "don't replant" is a refusal of the REPLANT, not of the harvest, so it is cut out
+# before the negation guard runs - otherwise the whole request reads as negated.
+_REPLANT_REFUSAL = re.compile(
+    r"\b(?:don'?t|do\s+not|no)\s+(?:re)?plant(?:ing|ed|s)?\b"
+    r"|\bleave\s+(?:it|them|those|the\s+ground|the\s+soil)\s+bare\b")
+
 _QUESTION_START = re.compile(
     r"^(what|why|how|who|where|when|which|whose|are|aren't|is|isn't|am|was|"
     r"were|do|does|did|don't|doesn't|didn't|can|could|would|will|should|"
@@ -93,6 +119,24 @@ _NARRATION = re.compile(r"^i\s+(was|am|'m|will be|had|have)\b")
 
 def _tokens(text: str):
     return re.findall(r"[a-z']+", text)
+
+
+def _crop_hint(words) -> str:
+    """Crop named in the wording, or "".
+
+    Tolerates a misheard or mistyped crop ("cauilflower"): only words long enough to
+    be a real noun, and only a close match, so ordinary words never become crops.
+    """
+    for w in words:
+        if w in _CROP_WORDS:
+            return _CROP_ALIASES.get(w) or w
+    for w in words:
+        if w in FARM_VERBS or w in HARVEST_VERBS or len(w) < 5:
+            continue
+        near = difflib.get_close_matches(w, _CANONICAL_CROPS, n=1, cutoff=0.82)
+        if near:
+            return near[0]
+    return ""
 
 
 def detect_farm(message: str) -> tuple[bool, int, str]:
@@ -149,22 +193,7 @@ def detect_farm(message: str) -> tuple[bool, int, str]:
         if _SINGLE_CUE.search(text) or "seed" in words:
             count = 1
 
-    hint = ""
-    for w in words:
-        if w in _CROP_WORDS:
-            hint = _CROP_ALIASES.get(w) or w
-            break
-    if not hint:
-        # Tolerate a misheard or mistyped crop ("cauilflower"). Only words long enough to
-        # be a real noun, and only a close match, so ordinary words never become crops.
-        for w in words:
-            if w in FARM_VERBS or len(w) < 5:
-                continue
-            near = difflib.get_close_matches(w, _CANONICAL_CROPS, n=1, cutoff=0.82)
-            if near:
-                hint = near[0]
-                break
-    return True, count, hint
+    return True, count, _crop_hint(words)
 
 
 # Which kind of seed the player asked for. "eternal" and "normal" plant the same crop
@@ -215,6 +244,88 @@ def is_kind_answer(message: str) -> bool:
     if any(w in FARM_VERBS for w in words):
         return False          # a full farm request: detect_farm owns it
     return bool(seed_kind(message)) and len(words) <= 5
+
+
+def detect_harvest(message: str) -> tuple[bool, int, str]:
+    """Force a harvest task from an imperative reap verb.
+
+    Returns ``(is_harvest, count, crop_hint)``. ``count`` is 0 for "every ripe crop
+    in range" (the plugin's default), and ``crop_hint`` is "" for any crop.
+    """
+    raw = (message or "").strip().lower()
+    if not raw:
+        return False, 0, ""
+    if "?" in raw:
+        return False, 0, ""
+    text = re.sub(r"\s+", " ", raw)
+    # A refused REPLANT is not a refused harvest: cut it out before the guards.
+    body = re.sub(r"\s+", " ", _REPLANT_REFUSAL.sub(" ", text)).strip()
+    if _QUESTION_START.match(body):
+        lead = _REQUEST_LEAD.match(body)
+        if lead:
+            body = body[lead.end():]
+        else:
+            return False, 0, ""
+    if _NARRATION.match(body):
+        return False, 0, ""
+    if _NEGATION.search(body):
+        return False, 0, ""
+
+    words = _tokens(body)
+    if not any(w in HARVEST_VERBS for w in words):
+        return False, 0, ""
+
+    hint = _crop_hint(words)
+    if not any(w in _STRONG_HARVEST_VERBS for w in words):
+        # "pick"/"collect" need a crop (or crop-shaped context) in the sentence.
+        if not hint and not any(w in _HARVEST_CONTEXT for w in words):
+            return False, 0, ""
+
+    # Same count grammar as planting: a number, a singular cue, or "all"/"everything".
+    return True, count_from_message(body), hint
+
+
+# The plugin's scan cap. A 512x512 box is already 250k columns to read; past that the
+# walk would take longer than any farm the player owns.
+MAX_RADIUS = 256
+
+
+def harvest_radius(message: str) -> int:
+    """Requested scan radius in blocks, or 0 for the plugin default (16).
+
+    "harvest all in 100x100" is a rectangle -> half its longest side; "50x500" -> 250;
+    "within 40 blocks" / "a 20 block radius" are explicit radii. A bare count
+    ("harvest 5 carrots") is a number of crops, never an area, so it returns 0.
+    """
+    text = (message or "").lower()
+    m = re.search(r"(\d{1,4})\s*[x?]\s*(\d{1,4})", text)
+    if m:
+        return max(4, min(MAX_RADIUS,
+                          int(round(max(int(m.group(1)), int(m.group(2))) / 2.0))))
+    m = re.search(r"(\d{1,4})\s*(?:block|blocks)?\s*radius", text)
+    if m:
+        return max(4, min(MAX_RADIUS, int(m.group(1))))
+    m = re.search(r"(?:within|in)\s+(\d{1,4})\s*(?:blocks?)\b", text)
+    if m:
+        return max(4, min(MAX_RADIUS, int(m.group(1))))
+    return 0
+
+
+def wants_no_replant(message: str) -> bool:
+    """True when the player explicitly refused the replant ("leave it bare")."""
+    return bool(_REPLANT_REFUSAL.search((message or "").lower()))
+
+
+def harvest_ack(count: int, hint: str) -> str:
+    """A short spoken acknowledgement for a forced harvest task.
+
+    No number: the honest count only exists after the read-back, and the farm ack's
+    "planting 5" promise is what made a silent clamp look like a lie.
+    """
+    crop = (hint or "").strip().lower()
+    if crop:
+        return f"On it - harvesting the {crop}."
+    return "On it - harvesting whatever's ripe."
 
 
 def farm_ack(count: int, hint: str) -> str:

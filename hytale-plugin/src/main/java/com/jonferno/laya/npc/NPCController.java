@@ -37,6 +37,7 @@ import com.hypixel.hytale.server.core.cosmetics.CosmeticsModule;
 import com.hypixel.hytale.server.core.modules.entity.player.PlayerCreativeSettings;
 import com.hypixel.hytale.server.core.modules.entity.player.PlayerSettings;
 import com.hypixel.hytale.server.core.modules.entity.player.PlayerSkinComponent;
+import com.hypixel.hytale.server.core.asset.type.item.config.Item;
 import com.hypixel.hytale.server.core.modules.item.ItemModule;
 import com.hypixel.hytale.server.core.modules.block.BlockModule;
 import com.hypixel.hytale.server.core.modules.block.components.ItemContainerBlock;
@@ -61,6 +62,7 @@ import com.jonferno.laya.world.BlockBreaker;
 import com.jonferno.laya.world.BlockScanner;
 import com.jonferno.laya.world.FarmCrops;
 import com.jonferno.laya.world.FarmProbe;
+import com.jonferno.laya.world.HarvestProbe;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
@@ -124,6 +126,15 @@ public class NPCController {
     private static final double FOLLOW_START_BUFFER = 1.5; // recompute when player is this far beyond stand-off
     private static final double FOLLOW_STOP_BUFFER = 0.5;  // hysteresis so the written slot doesn't jitter
     private static final double LEASH_TELEPORT_DISTANCE = 25.0; // watchdog: teleport catch-up beyond this
+    /**
+     * "Out of position" distance: well past the ~2.7 stand-off, well inside the 25-block
+     * leash. Beyond this she re-aims at the player instead of trusting a stale ring point,
+     * the idle shuffle is suppressed, and the stuck watchdog engages on player distance
+     * alone. Measured 2026-10-26: a cancelled harvest left her 19 blocks away, the shuffle
+     * kept writing targets ~2 blocks from her own feet (under STUCK_MIN_SLOT_DISTANCE), so
+     * the slot-distance watchdog never fired and she stood there for 30 s.
+     */
+    private static final double FOLLOW_CATCHUP_DISTANCE = 6.0;
     private static final long TICK_MS = 333;               // 3 slot writes/sec — Java decides *where*
     private static final long STUCK_MS = 3000;             // ~60 engine ticks with no progress -> watchdog
     private static final double STUCK_EPSILON = 0.1;       // movement below this counts as "no progress"
@@ -200,6 +211,34 @@ public class NPCController {
     private static final long FARM_STAGE_WAIT_MS = 750;
     private static final long FARM_BETWEEN_MS = 250;
 
+    // --- Harvesting (2026-10-26): reap ripe crops near the player, replant from her pack ---
+    // The primitive (FarmingUtil.harvest) does NO reach check - the interaction layer does
+    // that for players - so HARVEST_REACH is not cosmetic: without it she would vacuum a
+    // field from where she stands.
+    /** How far from the player a ripe crop is still "nearby" (32x32 around them). */
+    private static final int HARVEST_RADIUS = 16;
+    /** "harvest all in 100x100" / "50x500" -> radius, capped here (512x512 box). */
+    private static final int HARVEST_MAX_RADIUS = 256;
+    /**
+     * A bare "harvest" never looks further than this. 16 blocks is "here", 32 is "the farm
+     * next door"; a crop 78 blocks away is not what "harvest" means. Measured 2026-10-26:
+     * the widening found mushrooms at 77.8 blocks and she walked off to them while the
+     * carrots stayed at her feet.
+     */
+    private static final int HARVEST_NEAR_RADIUS = 32;
+    /** Vertical slack around the player's feet; crops are never far above/below. */
+    private static final int HARVEST_Y_RADIUS = 3;
+    /** Hard cap per request, so "harvest everything" cannot run for an hour. */
+    private static final int HARVEST_MAX_CELLS = 400;
+    private static final double HARVEST_REACH = 2.6;
+    private static final long HARVEST_WALK_REPOINT_MS = 600;
+    private static final long HARVEST_UNSTICK_MS = 4_000;
+    private static final int HARVEST_MAX_UNSTICKS = 2;
+    private static final long HARVEST_CELL_TIMEOUT_MS = 15_000;
+    /** The harvest call is synchronous; this is the beat before the read-back. */
+    private static final long HARVEST_ACT_WAIT_MS = 250;
+    private static final long HARVEST_BETWEEN_MS = 150;
+
     // --- Task 6: task executor (mine/gather) state machine ---
     // taskPhase: IDLE -> WALKING (task slot written) -> WORKING (adjacent, timed break
     // chain) -> DONE (block gone; settle so the role's pickup can run) -> IDLE (cleared).
@@ -242,6 +281,20 @@ public class NPCController {
     private static final Map<String, String> BLOCK_NAMES = new ConcurrentHashMap<>();
     private static final Map<String, Pattern> HINT_PATTERNS = new ConcurrentHashMap<>();
     private static final Map<String, String> HINT_LABELS = new ConcurrentHashMap<>();
+
+    /**
+     * "Everything around us": any block that is a gatherable resource, which is what the
+     * player means by "gather everything". Deliberately excludes the farm
+     * ({@code Plant_Crop_*}), planted seeds ({@code Plant_Seeds_*}), tree leaves
+     * ({@code Plant_Leaves_*}), saplings and bare terrain - otherwise she would strip the
+     * carrot patch and the canopy while "clearing" the meadow.
+     */
+    static final Pattern ANY_RESOURCE = Pattern.compile(
+        "^(?:Wood_.*_Trunk(?:_Full)?"
+        + "|Ore_.*"
+        + "|Rubble_.*"
+        + "|Plant_Crop_Mushroom_.*"
+        + "|Plant_(?!Crop_|Seeds_|Leaves_|Sapling_).*)$");
     private static volatile boolean blocksLoaded = false;
 
     // Plugin -> ai-bridge event channel. Same HttpClient rules as ChatListener:
@@ -365,6 +418,27 @@ public class NPCController {
     private int farmSkipped = 0;
     private double farmLastDist = Double.MAX_VALUE;
     private int farmUnsticks = 0;
+
+    // --- Harvesting (2026-10-26) state: WORLD-THREAD ONLY mutations ---
+    /** Ripe crop cells as {x, y, z} - the crop block itself, not the soil below it. */
+    private final java.util.List<int[]> harvestQueue = new java.util.ArrayList<>();
+    private int harvestIndex = 0;
+    private boolean harvestFired = false;      // the current cell's harvest call was made
+    private long harvestNextActMs = 0;
+    private long harvestLastWalkMs = 0;
+    private long harvestCellSinceMs = 0;
+    private double harvestLastDist = Double.MAX_VALUE;
+    private int harvestUnsticks = 0;
+    private boolean harvestReplant = true;     // "leave it bare" turns this off
+    private String harvestCropHint = "";       // crop word from the bridge, "" = any
+    /** Captured BEFORE the harvest call: the block (and its id) is gone afterwards. */
+    private String harvestCellCrop = "";
+    private boolean harvestCellEternal = false;
+    private int harvestPicked = 0;
+    private int harvestEternalCount = 0;
+    private int harvestReplanted = 0;
+    private int harvestBare = 0;
+    private int harvestSkipped = 0;
 
     // Task ownership (Task 4): true while Laya stands within TASK_ADJACENT of the live
     // task point. Task 7 consumes it (isTaskAdjacent); world-thread writes, so volatile.
@@ -1055,7 +1129,9 @@ public class NPCController {
         if (taskKind == null || "IDLE".equals(taskPhase)) return null;
         // Task 6: the Farm icon shows while she is actually working, and drops back to
         // Follow the moment the task ends (phase IDLE/DONE).
-        if ("farm".equals(taskKind)) return "farming";
+        // Harvesting reuses the Farm icon on purpose: same activity to the player, and
+        // no new art was asked for (2026-10-26).
+        if ("farm".equals(taskKind) || "harvest".equals(taskKind)) return "farming";
         if ("mine".equals(taskKind)) return "mining";
         String label = taskLabel == null ? "" : taskLabel.toLowerCase();
         if (label.contains("wood") || label.contains("log") || label.contains("oak")
@@ -2091,6 +2167,15 @@ public class NPCController {
         farmNextActMs = 0;
         farmCellSinceMs = 0;
         farmLastWalkMs = 0;
+        // Harvesting: same rule - a cancelled reap must not resume from a stale queue.
+        harvestQueue.clear();
+        harvestIndex = 0;
+        harvestFired = false;
+        harvestNextActMs = 0;
+        harvestCellSinceMs = 0;
+        harvestLastWalkMs = 0;
+        harvestCellCrop = "";
+        harvestCellEternal = false;
         // Clearing the kind is what stops farmTick from re-entering on an empty queue
         // after a reset (it posted task_done every tick and the bridge answered each
         // one - the "done, what's next" spam).
@@ -2338,6 +2423,11 @@ public class NPCController {
                                 double adz = p.z - followAnchor.z;
                                 reanchor = Math.sqrt(adx * adx + adz * adz) > FOLLOW_START_BUFFER;
                             }
+                            if (!reanchor && dist > FOLLOW_CATCHUP_DISTANCE) {
+                                // Left behind: a static player must not leave the ring
+                                // anchored to a point she already failed to reach.
+                                reanchor = true;
+                            }
                             if (reanchor) {
                                 // Point on the stand-off ring, on LAYA'S side of the player.
                                 // FIX CYCLE 2: this used (player - Laya), the unit vector pointing
@@ -2383,7 +2473,10 @@ public class NPCController {
                             // shuffling immediately, so a spawn never counts as an idle shuffle.
                             if (nextIdleShuffleMs == 0) {
                                 nextIdleShuffleMs = now + 20_000L + ThreadLocalRandom.current().nextLong(20_000L);
-                            } else if (now >= nextIdleShuffleMs && lastTaskWriteMs == 0) {
+                            } else if (now >= nextIdleShuffleMs && lastTaskWriteMs == 0
+                                && dist <= FOLLOW_CATCHUP_DISTANCE) {
+                                // Never shuffle while she is out of position: a 2-block
+                                // step overrides the catch-up target and hides the stall.
                                 // Fix cycle 1 (head focus): a random-direction shuffle left
                                 // her facing away from the player ~2/3 of the time, and the
                                 // head Watch can only cover +/-45 deg relative to the body.
@@ -2469,13 +2562,17 @@ public class NPCController {
                         // Wraps Task 4's adjacency result: she reaches the block -> WORKING.
                         // Reach timeout only applies while WALKING (never arrived). DONE
                         // settles TASK_SETTLE_MS so the role's DroppedItem pickup can run.
-                        if ("farm".equals(taskKind)
+                        if (("farm".equals(taskKind) || "harvest".equals(taskKind))
                             && !"IDLE".equals(taskPhase) && !"DONE".equals(taskPhase)) {
                             // Task 5: farming owns its own cells - walk, till, plant,
                             // next cell. Deliberately NOT routed through the
                             // WALKING/WORKING mine/gather machine, whose WORKING phase
-                            // breaks blocks.
-                            farmTick(now, l);
+                            // breaks blocks. Harvesting walks its own cells the same way.
+                            if ("harvest".equals(taskKind)) {
+                                harvestTick(now, l);
+                            } else {
+                                farmTick(now, l);
+                            }
                         } else if ("WALKING".equals(taskPhase)) {
                             if (isTaskAdjacent()) {
                                 boolean woodTask = AXE_HINTS.contains(
@@ -2592,7 +2689,9 @@ public class NPCController {
                         // Follow-ring recovery is follow-phased; task phases own their own
                         // recovery (reach-timeout + the abandonment check above). Gating on
                         // taskLive also stops the stale follow point yanking her off the block.
-                        if (!taskLive && slotDist > STUCK_MIN_SLOT_DISTANCE && !motionLocked) {
+                        if (!taskLive && !motionLocked
+                            && (slotDist > STUCK_MIN_SLOT_DISTANCE
+                                || dist > FOLLOW_CATCHUP_DISTANCE)) {
                             boolean moved = Math.abs(l.x - lastX) > STUCK_EPSILON
                                 || Math.abs(l.z - lastZ) > STUCK_EPSILON;
                             if (moved) {
@@ -3175,7 +3274,7 @@ public class NPCController {
         taskDoneCount = 0;
         taskHint = h;
         taskScope = "area".equalsIgnoreCase(scope) ? "area" : "tree";
-        taskRadius = radius > 0 ? Math.min(radius, 32) : 0;
+        taskRadius = radius > 0 ? Math.min(radius, 50) : 0;
         taskAreaSet = false;     // a new area task anchors to its own first scan
         taskAnchorSet = false;   // cycle 10b: a new task re-pins to its own first block
         taskFelled = false;      // cycle 11: fresh fell latch per task
@@ -3193,6 +3292,15 @@ public class NPCController {
                     // chests), then farmTick() walks and plants cell by cell.
                     // `scope` carries the seed kind for farm tasks (eternal|normal|"").
                     startFarmTask(requested, h, scope);
+                } else if ("harvest".equals(t)) {
+                    // `scope` carries the replant choice for harvest tasks
+                    // ("noreplant" turns it off; anything else leaves it on), `radius` the
+                    // requested area ("in 100x100" -> 50). The cell cap is the harvest
+                    // one, not the mine/gather 64: "harvest all in 100x100" is a request
+                    // for everything in there, up to HARVEST_MAX_CELLS.
+                    startHarvestTask(
+                        count <= 0 ? 0 : Math.min(count, HARVEST_MAX_CELLS),
+                        h, !"noreplant".equalsIgnoreCase(scope), radius);
                 } else if ("mine".equals(t) || "gather".equals(t)) {
                     // Task 6 refusal gate (world-thread, BEFORE any task-slot write):
                     // mining needs a pickaxe in Laya's inventory; gather uses the
@@ -3210,7 +3318,7 @@ public class NPCController {
                     runScan(t, h);
                 } else {
                     plugin.log("Unknown task: " + t);
-                    postEvent("task_failed", t + ": unknown task (expected identify|mine|gather|farm)");
+                    postEvent("task_failed", t + ": unknown task (expected identify|mine|gather|farm|harvest)");
                 }
             } catch (Throwable ex) {
                 plugin.log("Task '" + t + "' failed: " + ex);
@@ -3617,8 +3725,46 @@ public class NPCController {
         } else if (r < 0) {
             postEvent("task_failed", task + ": unknown target hint '" + hint + "'");
         } else if (r == 0) {
+            logNearMiss(hint, taskRadius > 0 ? taskRadius : (int) SCAN_RADIUS);
             postEvent("task_failed", "no " + hintLabel(hint) + " within "
                 + (taskRadius > 0 ? taskRadius : (int) SCAN_RADIUS) + " blocks");
+        }
+    }
+
+    /**
+     * One line for a scan that found nothing: the nearest cell whose CANONICAL key contains
+     * the hint word, with its distance. That separates "the field is out of range" from
+     * "the key form is not what blocks.json lists" - measured 2026-10-26 on wheat, where
+     * the scan read 9,195 cells and found 0 because the world held
+     * {@code *Plant_Crop_Wheat_Block_State_Definitions_StageFinal}.
+     */
+    private void logNearMiss(String hint, int radius) {
+        try {
+            if (worldStore == null || playerRef == null) return;
+            String want = hint.toLowerCase(java.util.Locale.ROOT);
+            Vector3d center = new Vector3d(playerRef.getTransform().getPosition());
+            BlockScanner.ScanResult hit = BlockScanner.scanNearest(worldStore, center, 32.0,
+                id -> {
+                    String k = BlockScanner.assetId(id);
+                    return k != null && HarvestProbe.canonicalKey(k)
+                        .toLowerCase(java.util.Locale.ROOT).contains(want);
+                }, null);
+            if (hit == null || !hit.found()) {
+                plugin.log("Scan " + hint + ": nothing named like '" + hint
+                    + "' within 32 blocks either");
+                return;
+            }
+            String key = BlockScanner.assetId(hit.blockId);
+            double dx = hit.x + 0.5 - center.x;
+            double dy = hit.y + 0.5 - center.y;
+            double dz = hit.z + 0.5 - center.z;
+            plugin.log("Scan " + hint + ": nearest '" + hint + "' block @" + hit.x + "," + hit.y
+                + "," + hit.z + " (" + String.format(java.util.Locale.ROOT, "%.1f",
+                    Math.sqrt(dx * dx + dy * dy + dz * dz))
+                + " blocks) key=" + key + " canonical=" + HarvestProbe.canonicalKey(key)
+                + " - outside the " + radius + " block scan");
+        } catch (Throwable t) {
+            plugin.log("Scan " + hint + " near-miss probe failed: " + t);
         }
     }
 
@@ -3682,6 +3828,18 @@ public class NPCController {
         int found = result == null ? 0 : result.found;
         plugin.log("Scan " + hint + " checked=" + checked + " found=" + found
             + " radius=" + (int) radius + " scope=" + taskScope);
+        // A field edge is not "nothing there": an unsized area task that finds nothing at
+        // the default 16 gets one wider look at 32, the same rule the harvest sweep uses.
+        if ((result == null || !result.found()) && area && !isWood && taskRadius == 0) {
+            BlockScanner.ScanResult wide = BlockScanner.scanNearest(
+                worldStore, center, 32.0, id -> matchesHint(scanPattern, id), null, 8.0);
+            if (wide != null && wide.found()) {
+                plugin.log("Scan " + hint + ": nothing within " + (int) SCAN_RADIUS
+                    + " - widened to 32 and found " + wide.found);
+                taskRadius = 32;
+                result = wide;
+            }
+        }
         if (result == null || !result.found()) {
             return 0;
         }
@@ -3972,7 +4130,7 @@ public class NPCController {
         int done = ++taskDoneCount;
         final String verb = taskSnapVerb == null ? "finished" : taskSnapVerb;
         final String label = taskSnapLabel == null ? "block" : taskSnapLabel;
-        final String key = taskSnapKey == null ? "?" : taskSnapKey;
+        final String key = taskSnapKey == null ? "?" : HarvestProbe.canonicalKey(taskSnapKey);
         final int requested = taskTargetCount;
         final String hint = taskHint == null ? "" : taskHint;
 
@@ -4103,6 +4261,11 @@ public class NPCController {
         }
     }
 
+    /** "" -> null, so "declared but empty" never wins over a populated drop source. */
+    private static String nonEmpty(String s) {
+        return s == null || s.isEmpty() ? null : s;
+    }
+
     private void grantBlockReward() {
         try {
             BlockType bt = BlockType.getAssetMap() == null ? null
@@ -4111,11 +4274,13 @@ public class NPCController {
             BlockGathering gathering = bt.getGathering();
             if (gathering == null) return;
 
-            // A block declares its drop under ONE of four gathering types. The
-            // original code read only `breaking`, so soft clutter (all rubble,
-            // flint, ...) declared under `Soft` silently granted nothing: the
-            // block broke and her inventory never changed. Resolve the first
-            // type that is present, in the engine's own precedence order.
+            // A block declares its drop under one of three gathering types, and the
+            // engine picks the source by ACTIVITY in the order breaking > harvest > soft.
+            // An empty source is not "no drop": `BlockHarvestUtils.getDrops` falls back to
+            // the BLOCK ITSELF, which is what hand-picking a flower gives. Measured
+            // 2026-10-26: `Plant_Flower_Tall_Yellow` is `Harvest: {}` +
+            // `Soft.DropList: Plant_Sunflower`, so breaking it (our destroy path) handed
+            // back Yellow Petals while "gather the sunflowers" means the flower itself.
             String itemId = null;
             String dropListId = null;
             int quantity = 1;
@@ -4125,15 +4290,25 @@ public class NPCController {
             SoftBlockDropType soft = gathering.getSoft();
 
             if (breaking != null) {
-                itemId = breaking.getItemId();
-                dropListId = breaking.getDropListId();
+                itemId = nonEmpty(breaking.getItemId());
+                dropListId = nonEmpty(breaking.getDropListId());
                 quantity = Math.max(1, breaking.getQuantity());
             } else if (harvest != null) {
-                itemId = harvest.getItemId();
-                dropListId = harvest.getDropListId();
+                itemId = nonEmpty(harvest.getItemId());
+                dropListId = nonEmpty(harvest.getDropListId());
             } else if (soft != null) {
-                itemId = soft.getItemId();
-                dropListId = soft.getDropListId();
+                itemId = nonEmpty(soft.getItemId());
+                dropListId = nonEmpty(soft.getDropListId());
+            }
+            if (itemId == null && dropListId == null) {
+                // The engine's own fallback: a source that names no item and no drop list
+                // drops the block's own item.
+                Item own = bt.getItem();
+                if (own != null) itemId = nonEmpty(own.getId());
+            }
+            if (itemId == null && dropListId == null) {
+                plugin.log("Task reward: no drop data on '" + bt.getId() + "' - nothing granted");
+                return;
             }
 
             List<ItemStack> drops = new ArrayList<>();
@@ -4710,6 +4885,356 @@ public class NPCController {
         postEvent("task_done", sb.toString());
     }
 
+    // --- Harvesting (2026-10-26): the executor -----------------------------------
+    // Mechanism: FarmProbe's sibling, HarvestProbe, which calls the engine's own
+    // FarmingUtil.harvest. Plain crops are consumed (block removed), Eternal crops reset
+    // to "Harvested" and regrow, and the drops go into her pack (remainder at her feet).
+    // Nothing here guesses: the report counts read-backs.
+
+    /**
+     * Ripe cells within {@code r} of {@code pp}: the normal vertical band first, then one
+     * taller look so a crop below a wall or on the next terrace is still found.
+     */
+    private java.util.List<int[]> ripeAround(Vector3d pp, int r, String crop) {
+        java.util.List<int[]> cells = HarvestProbe.sweep(world, pp, r, HARVEST_Y_RADIUS, crop);
+        if (!cells.isEmpty()) return cells;
+        cells = HarvestProbe.sweep(world, pp, r, HARVEST_Y_RADIUS * 3, crop);
+        if (!cells.isEmpty()) {
+            plugin.log("Harvest: found them with a taller look (+-" + (HARVEST_Y_RADIUS * 3)
+                + " blocks vertically) at r=" + r);
+        }
+        return cells;
+    }
+
+    /**
+     * "harvest" task (world thread). Scans for ripe crops around the PLAYER, tops up
+     * replant seeds from nearby chests when a crop was named, then hands off to
+     * {@link #harvestTick} which walks and reaps cell by cell.
+     *
+     * @param wanted 0 = every ripe crop in range, else exactly that many cells
+     * @param hint   crop word from the bridge ("carrot"), or "" for any ripe crop
+     * @param replant true to put a seed from her pack back in each emptied cell
+     * @param radius requested scan radius ("in 100x100" -> 50); 0 = HARVEST_RADIUS
+     */
+    private void startHarvestTask(int wanted, String hint, boolean replant, int radius) {
+        if (taskSlot < 0) {
+            plugin.log("Harvest: refused - task slot unbound");
+            postEvent("task_failed", "I can't work out where to stand for that");
+            return;
+        }
+        Ref<EntityStore> playerEntity = playerRef == null ? null : playerRef.getReference();
+        TransformComponent pt = playerEntity == null ? null
+            : worldStore.getComponent(playerEntity, TransformComponent.getComponentType());
+        if (pt == null) {
+            plugin.log("Harvest: refused - no player transform");
+            postEvent("task_failed", "I can't see where you are standing");
+            return;
+        }
+        Vector3d pp = new Vector3d(pt.getPosition());
+        String crop = hint == null ? "" : hint.trim().toLowerCase(java.util.Locale.ROOT);
+        // The bridge forwards the model's literal "null"/"none"/"any" spellings.
+        if (crop.equals("null") || crop.equals("none") || crop.equals("any")
+            || crop.equals("whatever") || crop.equals("-") || crop.equals("crops")
+            || crop.equals("crop")) {
+            crop = "";
+        }
+
+        int asked = radius > 0 ? Math.min(radius, HARVEST_MAX_RADIUS) : HARVEST_RADIUS;
+        boolean explicitArea = radius > 0;
+        java.util.List<int[]> cells;
+        int scanRadius = asked;
+
+        // 1. The asked area (default 16): normal band, then one taller look - a wall, a
+        // path or a terrace is enough to hide a crop from a +-3 band.
+        cells = ripeAround(pp, asked, crop);
+        if (!cells.isEmpty() && asked != HARVEST_RADIUS) {
+            plugin.log("Harvest: found " + cells.size() + " ripe cell(s) within " + asked + " blocks");
+        }
+
+        // 2. The block under the crosshair. Pointing at one ripe thing must always work,
+        // whatever the scan said, and the line it logs is the only place we can learn what
+        // the player is actually looking at ("carrots right here" the sweep never saw).
+        Vector3i looked = null;
+        try {
+            looked = TargetUtil.getTargetBlock(playerEntity, 12.0, worldStore);
+            if (looked != null) {
+                plugin.log("Harvest: looking at "
+                    + HarvestProbe.describe(world, looked.x, looked.y, looked.z));
+            }
+        } catch (Throwable t) {
+            plugin.log("Harvest: look-at probe failed: " + t);
+        }
+        if (cells.isEmpty() && looked != null
+            && HarvestProbe.isHarvestableDirect(world, looked.x, looked.y, looked.z)) {
+            cells = new java.util.ArrayList<>();
+            cells.add(new int[]{looked.x, looked.y, looked.z});
+            scanRadius = 0;
+            plugin.log("Harvest: using the block under the crosshair instead");
+        }
+
+        // 3. Bare "harvest" only: widen once, to 32. Never to 64 - a crop two fields away
+        // is not "around here", and walking to it is exactly the run-away he reported. An
+        // explicit area ("in 100x100") is taken literally and is never widened.
+        if (cells.isEmpty() && !explicitArea) {
+            cells = ripeAround(pp, HARVEST_NEAR_RADIUS, crop);
+            if (!cells.isEmpty()) {
+                scanRadius = HARVEST_NEAR_RADIUS;
+                plugin.log("Harvest: nothing within " + asked + " blocks - widened to "
+                    + HARVEST_NEAR_RADIUS + " and found " + cells.size());
+            }
+        }
+        if (cells.isEmpty()) {
+            plugin.log("Harvest: refused - no ripe crop within " + scanRadius
+                + " blocks (crop=" + (crop.isEmpty() ? "any" : crop) + ")");
+            postEvent("task_failed", crop.isEmpty()
+                ? "there's nothing ripe to pick around here"
+                : "there's no ripe " + crop + " around here");
+            return;
+        }
+        final int found = cells.size();
+        int want = wanted <= 0 ? cells.size() : Math.min(wanted, cells.size());
+        want = Math.min(want, HARVEST_MAX_CELLS);
+        if (want < cells.size()) cells = new java.util.ArrayList<>(cells.subList(0, want));
+
+        // Replant seeds: only knowable when a crop was named. Top up from chests now,
+        // not mid-run - a walk back to a chest mid-reap looks like she wandered off.
+        if (replant && !crop.isEmpty() && cells.size() > 0) {
+            int have = seedCountFor(crop, "normal") + seedCountFor(crop, "eternal");
+            if (have < cells.size()) {
+                int got = harvestSeedsFromChests(crop, "normal", cells.size() - have);
+                have = seedCountFor(crop, "normal") + seedCountFor(crop, "eternal");
+                if (have < cells.size()) {
+                    got += harvestSeedsFromChests(crop, "eternal", cells.size() - have);
+                }
+                if (got > 0) {
+                    plugin.log("Harvest: topped up " + got + " replant seed(s) from chests");
+                }
+            }
+        }
+
+        harvestQueue.clear();
+        harvestQueue.addAll(cells);
+        harvestIndex = 0;
+        harvestFired = false;
+        harvestNextActMs = 0;
+        harvestCellSinceMs = 0;
+        harvestLastWalkMs = 0;
+        harvestLastDist = Double.MAX_VALUE;
+        harvestUnsticks = 0;
+        harvestReplant = replant;
+        harvestCropHint = crop;
+        harvestCellCrop = "";
+        harvestCellEternal = false;
+        harvestPicked = 0;
+        harvestEternalCount = 0;
+        harvestReplanted = 0;
+        harvestBare = 0;
+        harvestSkipped = 0;
+        taskKind = "harvest";
+        taskPhase = "WALKING";
+        taskTargetCount = cells.size();
+        taskDoneCount = 0;
+        taskHint = crop;
+        taskLabel = crop.isEmpty() ? "crop" : crop;
+        phaseSinceMs = System.currentTimeMillis();
+        int[] first = cells.get(0);
+        plugin.log("Harvest: planned " + cells.size() + "/" + found + " ripe cell(s) r="
+            + scanRadius + " crop=" + (crop.isEmpty() ? "any" : crop)
+            + " replant=" + replant + " from the player at "
+            + (int) Math.floor(pp.x) + "," + (int) Math.floor(pp.y) + "," + (int) Math.floor(pp.z)
+            + " first @" + first[0] + "," + first[1] + "," + first[2]);
+    }
+
+    /** World-thread, once per follow tick while taskKind == "harvest". */
+    private void harvestTick(long now, Vector3d l) {
+        if (harvestQueue.isEmpty()) return;        // nothing planned: never report twice
+        if (harvestIndex >= harvestQueue.size()) {
+            finishHarvest();
+            return;
+        }
+        int[] cell = harvestQueue.get(harvestIndex);
+        int cx = cell[0], cy = cell[1], cz = cell[2];
+
+        // 1. Walk to the crop's column (same task-slot slot the farm path uses).
+        double d = Math.hypot(l.x - (cx + 0.5), l.z - (cz + 0.5));
+        if (d > HARVEST_REACH) {
+            if (harvestCellSinceMs == 0) {
+                harvestCellSinceMs = now;
+                harvestLastDist = d;
+            }
+            boolean noProgress = Math.abs(harvestLastDist - d) < 0.05;
+            harvestLastDist = d;
+            if (now - harvestLastWalkMs > HARVEST_WALK_REPOINT_MS && taskSlot >= 0) {
+                if (writeSlot(taskSlot, new Vector3d(cx + 0.5, cy + 0.5, cz + 0.5))) {
+                    refreshPath();
+                    lastTaskWriteMs = now;
+                }
+                harvestLastWalkMs = now;
+            }
+            // The engine Seek stalls on ledges and on the crop rows themselves; the farm
+            // executor's bounded teleport is the proven remedy, so it is reused verbatim.
+            if (noProgress && now - harvestCellSinceMs > HARVEST_UNSTICK_MS
+                && harvestUnsticks < HARVEST_MAX_UNSTICKS) {
+                double ox = l.x - (cx + 0.5), oz = l.z - (cz + 0.5);
+                double len = Math.hypot(ox, oz);
+                if (len < 1e-3) { ox = 1.0; oz = 0.0; len = 1.0; }
+                double sx = cx + 0.5 + ox / len * 1.0;
+                double sz = cz + 0.5 + oz / len * 1.0;
+                try {
+                    TransformComponent layaT = worldStore.getComponent(layaRef,
+                        TransformComponent.getComponentType());
+                    if (layaT != null) {
+                        layaT.teleportPosition(new Vector3d(sx, cy + 0.5, sz));
+                        refreshPath();
+                        harvestUnsticks++;
+                        plugin.log("Harvest: unstick " + harvestUnsticks + "/"
+                            + HARVEST_MAX_UNSTICKS + " - teleported beside cell @"
+                            + cx + "," + cy + "," + cz);
+                    }
+                } catch (Throwable t) {
+                    plugin.log("Harvest: unstick failed: " + t);
+                }
+                harvestCellSinceMs = now;
+                return;
+            }
+            if (now - harvestCellSinceMs > HARVEST_CELL_TIMEOUT_MS) {
+                harvestSkipped++;
+                plugin.log("Harvest: skipping cell @" + cx + "," + cy + "," + cz
+                    + " - couldn't reach it");
+                nextHarvestCell(now);
+            }
+            return;
+        }
+
+        if (now < harvestNextActMs) return;
+
+        if (!harvestFired) {
+            // Someone else (or a previous pass) may have taken it. The gate is deliberately
+            // "is there still something harvestable here", NOT "is my ripeness predicate
+            // happy": the engine call is the authority, and a cell that came from the
+            // player's crosshair must work even if the sweep's predicate would reject it.
+            if (!HarvestProbe.isHarvestableDirect(world, cx, cy, cz)) {
+                harvestSkipped++;
+                plugin.log("Harvest: skipping @" + cx + "," + cy + "," + cz
+                    + " - nothing harvestable there any more");
+                nextHarvestCell(now);
+                return;
+            }
+            // Capture identity BEFORE the call: a plain crop's block is gone afterwards.
+            harvestCellCrop = HarvestProbe.cropWord(world, cx, cy, cz);
+            harvestCellEternal = HarvestProbe.isEternal(world, cx, cy, cz);
+            boolean ok = HarvestProbe.harvest(world, worldStore, layaRef, cx, cy, cz);
+            harvestFired = true;
+            harvestNextActMs = now + HARVEST_ACT_WAIT_MS;
+            plugin.log("Harvest: reap @" + cx + "," + cy + "," + cz + " engine=" + ok
+                + " crop=" + (harvestCellCrop.isEmpty() ? "?" : harvestCellCrop)
+                + " eternal=" + harvestCellEternal);
+            return;
+        }
+
+        // 2. Verify by read-back: gone = consumed, "Harvested" = Eternal and regrowing.
+        int id = BlockBreaker.blockId(world, cx, cy, cz);
+        boolean gone = id == BlockScanner.EMPTY_ID;
+        String stageSet = HarvestProbe.stageSetAt(world, cx, cy, cz);
+        boolean regrown = "Harvested".equals(stageSet);
+        if (gone || regrown) {
+            harvestPicked++;
+            if (regrown) harvestEternalCount++;
+            plugin.log("Harvest: picked " + (harvestCellCrop.isEmpty() ? "crop" : harvestCellCrop)
+                + " @" + cx + "," + cy + "," + cz
+                + (regrown ? " eternal=true (regrows)" : " eternal=false (consumed)"));
+            if (gone) replantHarvestCell(cx, cy, cz);
+        } else {
+            harvestSkipped++;
+            plugin.log("Harvest: reap FAILED @" + cx + "," + cy + "," + cz
+                + " - block=" + BlockScanner.assetId(id) + " stageSet=" + stageSet);
+        }
+        nextHarvestCell(now);
+    }
+
+    private void nextHarvestCell(long now) {
+        harvestIndex++;
+        taskDoneCount = harvestPicked;
+        harvestFired = false;
+        harvestCellSinceMs = 0;
+        harvestLastWalkMs = 0;
+        harvestLastDist = Double.MAX_VALUE;
+        harvestUnsticks = 0;
+        harvestNextActMs = now + HARVEST_BETWEEN_MS;
+        if (harvestIndex >= harvestQueue.size()) finishHarvest();
+    }
+
+    /**
+     * Put a seed back in a cell the harvest just emptied. Eternal crops never reach here -
+     * their block is still standing and regrows by itself. Uses the farm planter's raw
+     * write (the soil below is already tilled) and consumes the seed herself, exactly as
+     * the farm executor does.
+     */
+    private void replantHarvestCell(int cx, int cy, int cz) {
+        if (!harvestReplant) {
+            harvestBare++;
+            return;
+        }
+        String crop = harvestCellCrop == null ? "" : harvestCellCrop;
+        if (crop.isEmpty()) {
+            harvestBare++;
+            return;
+        }
+        // Same crop, same kind when she has it: the cell held a plain crop, so prefer a
+        // plain seed and fall back to Eternal (better a regrowing crop than bare soil).
+        String seed = equipFarmSeed(crop, "normal");
+        if (seed == null) seed = equipFarmSeed(crop, "eternal");
+        String cropBlock = FarmCrops.blockFor(seed);
+        if (seed == null || cropBlock == null) {
+            harvestBare++;
+            plugin.log("Harvest: no " + crop + " seed to replant @" + cx + "," + cy + "," + cz);
+            return;
+        }
+        String report = FarmProbe.plantRaw(world, cx, cy, cz, cropBlock);
+        if (report != null && report.contains("block=" + cropBlock)) {
+            try {
+                Inventory inv = npcEntity.getInventory();
+                ItemContainer hotbar = inv.getHotbar();
+                byte slot = inv.getActiveHotbarSlot();
+                hotbar.removeItemStackFromSlot(slot, 1);
+                saveInventory();
+            } catch (Throwable t) {
+                plugin.log("Harvest: replant seed consume failed: " + t);
+            }
+            harvestReplanted++;
+            plugin.log("Harvest: replanted " + cropBlock + " @" + cx + "," + cy + "," + cz
+                + " (" + report + ")");
+        } else {
+            harvestBare++;
+            plugin.log("Harvest: replant FAILED @" + cx + "," + cy + "," + cz + " - " + report);
+        }
+    }
+
+    /** Report verified counts through the normal event channel, then release the task. */
+    private void finishHarvest() {
+        final int picked = harvestPicked;
+        final int eternal = harvestEternalCount;
+        final int replanted = harvestReplanted;
+        final int bare = harvestBare;
+        final int skipped = harvestSkipped;
+        final String crop = harvestCropHint == null ? "" : harvestCropHint;
+        resetTaskState("harvest done");
+        if (picked == 0) {
+            postEvent("task_failed",
+                "couldn't pick any of them (" + skipped + " cell(s) failed)");
+            return;
+        }
+        StringBuilder sb = new StringBuilder("picked ").append(picked).append(' ')
+            .append(crop.isEmpty() ? "crop" : crop).append(picked == 1 ? "" : "s");
+        if (eternal > 0) sb.append(", ").append(eternal).append(" regrow");
+        if (replanted > 0) sb.append(", ").append(replanted).append(" replanted");
+        if (bare > 0) sb.append(", ").append(bare).append(" left bare");
+        if (skipped > 0) sb.append(", ").append(skipped).append(" skipped");
+        plugin.log("Harvest: done picked=" + picked + " eternal=" + eternal
+            + " replanted=" + replanted + " bare=" + bare + " skipped=" + skipped);
+        postEvent("task_done", sb.toString());
+    }
+
     /** Seeds of one crop and kind ("" = any) across her containers. */
     private int seedCountFor(String crop, String kind) {
         try {
@@ -5212,39 +5737,38 @@ public class NPCController {
         }
     }
 
+    /** Whole-word test over an already lower-cased string ("corn" not in "corner"). */
+    private static boolean containsWord(String text, String word) {
+        if (text == null || word == null || word.isEmpty()) return false;
+        int from = 0;
+        while (true) {
+            int i = text.indexOf(word, from);
+            if (i < 0) return false;
+            int end = i + word.length();
+            boolean leftOk = i == 0 || !Character.isLetterOrDigit(text.charAt(i - 1));
+            boolean rightOk = end >= text.length() || !Character.isLetterOrDigit(text.charAt(end));
+            if (leftOk && rightOk) return true;
+            from = end;
+        }
+    }
+
     /**
      * Resolve a spoken hint that is not in blocks.json's hint table against the
-     * full block display-name/key table (3,178 entries). This is the "every block
-     * I can name" fallback; it only runs for imperative task commands because the
-     * bridge produces the hint.
+     * full block display-name/key table. This is the "every block I can name" fallback;
+     * it only runs for imperative task commands because the bridge produces the hint.
+     *
+     * <p>Matching is by whole WORD, not substring: measured 2026-10-26, "gather corn"
+     * resolved to 64 keys and she spent the task on "Aspen Branch - Corner" blocks because
+     * "corner" contains "corn". When the word names a planted crop, only the crop block
+     * keys are kept, so "corn" cannot drag in 94 unrelated blocks.</p>
      */
-    private static Pattern resolveHintPattern(String hint) {
+    static Pattern resolveHintPattern(String hint) {
         ensureBlocksLoaded();
         String key = hint == null ? "" : hint.toLowerCase(java.util.Locale.ROOT).trim();
         if (key.isEmpty()) return null;
         Pattern known = HINT_PATTERNS.get(key);
         if (known != null) return known;
-        String[] words = key.replace('_', ' ').split("\\s+");
-        java.util.List<String> keys = new java.util.ArrayList<>();
-        for (Map.Entry<String, String> e : BLOCK_NAMES.entrySet()) {
-            String name = e.getValue().toLowerCase(java.util.Locale.ROOT).replace('_', ' ');
-            String asset = e.getKey().toLowerCase(java.util.Locale.ROOT).replace('_', ' ');
-            boolean all = true;
-            for (String w : words) {
-                String singular = w.endsWith("ies") && w.length() > 3
-                    ? w.substring(0, w.length() - 3) + "y"
-                    : (w.endsWith("s") && w.length() > 3 ? w.substring(0, w.length() - 1) : w);
-                if (!name.contains(w) && !name.contains(singular)
-                    && !asset.contains(w) && !asset.contains(singular)) {
-                    all = false;
-                    break;
-                }
-            }
-            if (all) {
-                keys.add(e.getKey());
-                if (keys.size() >= 64) break;
-            }
-        }
+        java.util.List<String> keys = resolveHintKeys(key);
         if (keys.isEmpty()) return null;
         StringBuilder regex = new StringBuilder("^(?:");
         for (int i = 0; i < keys.size(); i++) {
@@ -5259,6 +5783,48 @@ public class NPCController {
         return compiled;
     }
 
+    /**
+     * Block keys a spoken hint names, by whole word. Split out of
+     * {@link #resolveHintPattern} so it can be tested without writing to the live log.
+     */
+    static java.util.List<String> resolveHintKeys(String hint) {
+        ensureBlocksLoaded();
+        String key = hint == null ? "" : hint.toLowerCase(java.util.Locale.ROOT).trim();
+        java.util.List<String> keys = new java.util.ArrayList<>();
+        if (key.isEmpty()) return keys;
+        String[] words = key.replace('_', ' ').split("\\s+");
+        for (Map.Entry<String, String> e : BLOCK_NAMES.entrySet()) {
+            String name = e.getValue().toLowerCase(java.util.Locale.ROOT).replace('_', ' ');
+            String asset = e.getKey().toLowerCase(java.util.Locale.ROOT).replace('_', ' ');
+            boolean all = true;
+            for (String w : words) {
+                String singular = w.endsWith("ies") && w.length() > 3
+                    ? w.substring(0, w.length() - 3) + "y"
+                    : (w.endsWith("s") && w.length() > 3 ? w.substring(0, w.length() - 1) : w);
+                if (!containsWord(name, w) && !containsWord(name, singular)
+                    && !containsWord(asset, w) && !containsWord(asset, singular)) {
+                    all = false;
+                    break;
+                }
+            }
+            if (all) {
+                keys.add(e.getKey());
+                if (keys.size() >= 64) break;
+            }
+        }
+        // A planted crop has a block key per part; keep only "Plant_Crop_<x>_Block[_Eternal]"
+        // when the name resolved to one, so the field is the target and not the produce item.
+        java.util.List<String> crops = new java.util.ArrayList<>();
+        for (String k : keys) {
+            String c = HarvestProbe.canonicalKey(k);
+            if (c.startsWith("Plant_Crop_")
+                && (c.endsWith("_Block") || c.endsWith("_Block_Eternal"))) {
+                crops.add(k);
+            }
+        }
+        return crops.isEmpty() ? keys : crops;
+    }
+
     /** Any blocks.json hint pattern matches this block's engine asset key. */
     private static boolean matchesAnyHint(int blockId) {
         String key = BlockScanner.assetId(blockId);
@@ -5269,10 +5835,15 @@ public class NPCController {
         return false;
     }
 
-    /** Does this block's engine asset key match the hint pattern? */
+    /** Does this block match the hint pattern, canonically? */
     private static boolean matchesHint(Pattern pattern, int blockId) {
         String key = BlockScanner.assetId(blockId);
-        return key != null && pattern.matcher(key).find();
+        if (key == null) return false;
+        if (pattern.matcher(key).find()) return true;
+        // Planted/ripe crops and flowers are generated per-stage types whose raw key is
+        // not what blocks.json lists (see HarvestProbe.canonicalKey).
+        String canonical = HarvestProbe.canonicalKey(key);
+        return !canonical.equals(key) && pattern.matcher(canonical).find();
     }
 
     /** Display name from blocks.json (single name source), falling back to the asset key. */
@@ -5280,7 +5851,13 @@ public class NPCController {
         String key = BlockScanner.assetId(blockId);
         if (key == null) return "unknown block #" + blockId;
         String name = BLOCK_NAMES.get(key);
-        return name != null ? name : key;
+        if (name == null) {
+            // A grown crop's raw key is the generated variant
+            // (*Plant_Crop_Wheat_Block_State_Definitions_StageFinal); blocks.json holds the
+            // base key. Without this she said that whole key out loud.
+            name = BLOCK_NAMES.get(HarvestProbe.canonicalKey(key));
+        }
+        return name != null ? name : HarvestProbe.canonicalKey(key);
     }
 
     private static String hintLabel(String hint) {
@@ -5312,6 +5889,11 @@ public class NPCController {
                 HINT_PATTERNS.put(word, Pattern.compile(String.join("|", patterns)));
                 HINT_LABELS.put(word, hint.has("label") ? hint.get("label").getAsString() : entry.getKey());
             }
+            // Synthetic "everything" hint (bridge sentinel): any gatherable resource.
+            HINT_PATTERNS.put("everything", ANY_RESOURCE);
+            HINT_LABELS.put("everything", "resources");
+            HINT_PATTERNS.put("anything", ANY_RESOURCE);
+            HINT_LABELS.put("anything", "resources");
             JsonObject blocks = root.has("blocks") ? root.getAsJsonObject("blocks") : new JsonObject();
             for (Map.Entry<String, JsonElement> entry : blocks.entrySet()) {
                 if (entry.getValue() == null || !entry.getValue().isJsonObject()) continue;

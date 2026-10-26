@@ -6,7 +6,7 @@
 
 <p align="center">
   A local-first AI companion for Hytale: she follows, talks, remembers, mines,
-  gathers, and fights beside you.
+  gathers, farms, harvests, and fights beside you.
 </p>
 
 <p align="center">
@@ -17,6 +17,20 @@
 <p align="center">
   <strong>Tested on Hytale 0.7.4.</strong>
 </p>
+
+## What's new in 0.4.0
+
+- **Harvesting.** She reaps ripe crops with the engine's own harvest call, tells
+  plain from Eternal crops, and replants from her pack ("harvest the carrots",
+  "harvest all in the 100x100").
+- **Smarter gathering.** Hints match whole words against real item names, so "corn"
+  finds corn and not a corner; every gathered block gives its true drop; a crop
+  reports its real name ("Mature Wheat") instead of an asset key.
+- **New HUD icons** for attack, defend, follow, stay, gather, mine, chop, farm and
+  downed, all from one source set with consistent centring and weight.
+- **Fixes** across the board: planted crops were invisible to the scan on generated
+  per-stage block types, "gather everything" was treated as a noun, and the
+  interact page had dead space on the right.
 
 ## Why is she called Laya?
 
@@ -71,10 +85,15 @@ message. Exact numbers depend on the provider, GPU, and whether vision is used.
   are injected into every turn, so she no longer invents weapons she does not have.
 - **Pick a personality** in Settings - default, spicy, potty mouth, mean, flirty,
   depressed, military, or unhinged - as a trait layer over her base character.
-- Mine and gather with a deterministic task layer and block-name knowledge.
+- Mine and gather with a deterministic task layer and block-name knowledge:
+  "gather all that wheat", "gather 5 carrots", "gather the sunflowers", "gather
+  everything around us", "gather all the stone in a 50x50".
 - **Farm**: till a plot in front of you and plant seeds from her pack or a nearby
   chest - "plant five carrot seeds", "plant any seeds you have", "just seed" - see
   the Farming section below. A farming icon appears on the HUD while she works.
+- **Harvest**: reap every ripe crop around you with the engine's own harvest call -
+  "harvest", "harvest the carrots", "harvest 5", "harvest all in the 100x100" - and
+  replant from her pack. See the Harvesting section below.
 - Use a custom inventory page with Laya's pack, gear slots, player inventory,
   stacking, sorting, and click/double-click/right-click transfers, and a centred
   "Equipped" column.
@@ -124,9 +143,49 @@ plant 10 eternal wheat seeds
   giving up on it.
 - **Say "stop"** at any time to end the task.
 
-Farming is till-and-plant today. Harvesting, and the layout that doubles growth rate by
-putting a light source in the middle of the plot (Hytale's `LightLevel` growth modifier,
-x2, works with a lamp or torch alone), are the next steps.
+Farming is till-and-plant today. The layout that doubles growth rate by putting a
+light source in the middle of the plot (Hytale's `LightLevel` growth modifier, x2,
+works with a lamp or torch alone) is the next step.
+
+## Harvesting
+
+Ask her to reap and she walks the field crop by crop, using Hytale's own harvest
+primitive rather than a break interaction - so a ripe crop gives exactly what the
+game would give you, and an Eternal crop is left standing to regrow.
+
+```
+harvest
+harvest the carrots
+harvest 5 carrots
+pick whatever's ripe
+harvest all in the 100x100
+harvest the wheat, don't replant
+```
+
+- **Any ripe crop by default**, within 16 blocks of you; name a crop to narrow it.
+- **"Nearby" is honest**: an area you name ("in 100x100" = 50 blocks) is taken
+  literally, and a bare "harvest" widens only to 32 blocks. She will not walk two
+  fields over for one mushroom.
+- **Plain crops are consumed; Eternal crops regrow.** She reads which one it was from
+  the block itself and says so: "picked 6 carrots, 4 regrow, 1 replanted".
+- **Replanting is on by default** from her own pack, topped up from chests within
+  5 blocks before she starts. Say "don't replant" / "leave it bare" to stop it.
+- **Every count she reports is read back from the world**, never from what she meant
+  to do.
+
+## Gathering
+
+Gathering works from the same block knowledge the rest of her tasks use, with two
+details worth knowing:
+
+- **Hints are matched as whole words against the game's own item names**, so "corn"
+  finds the corn and never the 94 blocks with "corner" in their name.
+- **A gathered block gives its real drop.** Harvesting a flower brings back the
+  flower; a wild plant gives what the game gives. Nothing is invented.
+
+Say "gather everything around us" for a sweep of trunks, ore, rubble, wild
+mushrooms and non-crop plants - it deliberately skips your crops, sown seed blocks,
+leaves and bare terrain.
 
 ## In-game commands
 
@@ -239,17 +298,17 @@ Hytale world state, speech, actions
 - `ai-bridge/` - Python sidecar: speech, LLM, memory, vision, decisions, idle.
 - `ai-bridge/idlelogic.py` - idle-banter silence clock (unit-tested).
 - `ai-bridge/gearcheck.py` - gear-question matching for the inventory context.
-- `ai-bridge/farming.py` - farm-request parsing: crop, count, seed kind.
+- `ai-bridge/farming.py` - farm, harvest and gather-request parsing: crop, count, area, seed kind.
 
 - `ai-bridge/personalities.py` - personality trait layers.
 - `config/blocks.json` - player words to Hytale block names.
 - `config/hytale-knowledge.json` - compact game-knowledge reference.
 - `config/laya-persona.txt` - Laya's persona and response contract.
-- `dist/LayaPlugin-0.3.0.jar` - convenience plugin build.
+- `dist/LayaPlugin-0.4.0.jar` - convenience plugin build.
 
 ## Build the plugin
 
-The repository ships `dist/LayaPlugin-0.3.0.jar`. It is built against the 0.7.x
+The repository ships `dist/LayaPlugin-0.4.0.jar`. It is built against the 0.7.x
 server API and is **tested on Hytale 0.7.4**. If Hytale changes its API again,
 rebuild from source:
 
@@ -275,7 +334,6 @@ The web page at <http://127.0.0.1:8788> has two areas:
 
 ## Next up
 
-- **Harvesting**, so a planted field can be reaped instead of only sown.
 - **The light-boosted layout**: Hytale grows crops up to twice as fast when a light
   source sits in the middle of the plot (`LightLevel` growth modifier, x2, satisfied
   by a lamp or torch alone), so the next layout will place the light and ring the
