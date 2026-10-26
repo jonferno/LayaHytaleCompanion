@@ -73,6 +73,73 @@ On the development machine, typical turns are roughly **0.4-0.8 s for the LLM**
 and the first spoken sentence arrives around **1-2 s** after the player sends a
 message. Exact numbers depend on the provider, GPU, and whether vision is used.
 
+## Install
+
+### Requirements
+
+- Windows 10/11
+- Hytale 0.7.x
+- Python 3.11
+- A GPU laya.cpp can use: Vulkan (NVIDIA, AMD, Intel) or CUDA 12/13 on NVIDIA.
+  The installer downloads the matching build and the `typed-decisions` checkpoint.
+- Java 25 only if you build the plugin yourself
+- **Free Groq API key**: [create one here](https://console.groq.com/keys)
+- **Free z.ai API key**: [create one here](https://z.ai/manage-apikey/apikey)
+- **NanoGPT API key**: [create one here](https://nano-gpt.com/api) (paid; uncensored primary model)
+- **Deepgram API key**: [$200 starter credits here](https://console.deepgram.com/api-keys)
+- Optional: about 1 GB for Kokoro TTS and Parakeet local speech recognition
+
+Groq and z.ai are free to start; Deepgram includes $200 of starter credits,
+which should last a long time at normal companion use. NanoGPT is optional and
+billed per token by NanoGPT.
+
+### Quick start
+
+1. Clone or download this repository.
+
+   ```powershell
+   git clone https://github.com/jonferno/LayaHytaleCompanion.git
+   cd LayaHytaleCompanion
+   ```
+
+2. Run the installer. It downloads the required `laya.cpp` engine for you:
+
+   1. Double-click `install.bat`, or run:
+
+      ```powershell
+      powershell -ExecutionPolicy Bypass -File .\install.ps1
+      ```
+
+   2. Pick your GPU backend when it asks:
+
+      - **Vulkan** works on NVIDIA, AMD and Intel (about 77 MB)
+      - **CUDA 13** is fastest on a current NVIDIA driver (about 263 MB)
+      - **CUDA 12** for a V100 or an older NVIDIA driver (about 296 MB)
+
+   3. It fetches the engine plus the `typed-decisions` checkpoint (about 800 MB)
+      into `ai-bridge\laya\`, copies the plugin JAR, creates a local config with
+      **empty keys**, and installs the Python dependencies.
+
+   Unattended installs can pass the choice and skip prompts:
+
+   ```powershell
+   .\install.ps1 -LayaBackend cuda13 -HytalePath "D:\Games\Hytale"
+   ```
+
+   The optional local speech models download too unless you pass `-SkipModels`;
+   Deepgram works without them. Use `-SkipKokoro` to keep Parakeet STT but skip
+   the Kokoro model.
+
+3. Run `start.bat`, open <http://127.0.0.1:8788>, and paste your API keys
+   (including Deepgram) into the settings page. Save the settings.
+4. Start Hytale. The installer sets the plugin's config paths as user
+   environment variables, so restart Hytale once after the first install.
+5. In game, talk to Laya in chat or use `/laya`.
+
+See [INSTALL.md](INSTALL.md) for manual setup, the required `laya.cpp` engine,
+troubleshooting, and `reset-data.ps1` for a clean inventory, memory, and
+appearance.
+
 ## What she can do
 
 - Follow you, hold position, defend, attack, and use the custom HUD.
@@ -214,73 +281,6 @@ The other engines are backups:
 The roughly **1 GB Kokoro/Parakeet model download is optional**. You only need
 it for Kokoro TTS or local microphone speech recognition; Deepgram does not
 need those models.
-
-## Install
-
-### Requirements
-
-- Windows 10/11
-- Hytale 0.7.x
-- Python 3.11
-- A GPU laya.cpp can use: Vulkan (NVIDIA, AMD, Intel) or CUDA 12/13 on NVIDIA.
-  The installer downloads the matching build and the `typed-decisions` checkpoint.
-- Java 25 only if you build the plugin yourself
-- **Free Groq API key**: [create one here](https://console.groq.com/keys)
-- **Free z.ai API key**: [create one here](https://z.ai/manage-apikey/apikey)
-- **NanoGPT API key**: [create one here](https://nano-gpt.com/api) (paid; uncensored primary model)
-- **Deepgram API key**: [$200 starter credits here](https://console.deepgram.com/api-keys)
-- Optional: about 1 GB for Kokoro TTS and Parakeet local speech recognition
-
-Groq and z.ai are free to start; Deepgram includes $200 of starter credits,
-which should last a long time at normal companion use. NanoGPT is optional and
-billed per token by NanoGPT.
-
-### Quick start
-
-1. Clone or download this repository.
-
-   ```powershell
-   git clone https://github.com/jonferno/LayaHytaleCompanion.git
-   cd LayaHytaleCompanion
-   ```
-
-2. Run the installer. It downloads the required `laya.cpp` engine for you:
-
-   1. Double-click `install.bat`, or run:
-
-      ```powershell
-      powershell -ExecutionPolicy Bypass -File .\install.ps1
-      ```
-
-   2. Pick your GPU backend when it asks:
-
-      - **Vulkan** works on NVIDIA, AMD and Intel (about 77 MB)
-      - **CUDA 13** is fastest on a current NVIDIA driver (about 263 MB)
-      - **CUDA 12** for a V100 or an older NVIDIA driver (about 296 MB)
-
-   3. It fetches the engine plus the `typed-decisions` checkpoint (about 800 MB)
-      into `ai-bridge\laya\`, copies the plugin JAR, creates a local config with
-      **empty keys**, and installs the Python dependencies.
-
-   Unattended installs can pass the choice and skip prompts:
-
-   ```powershell
-   .\install.ps1 -LayaBackend cuda13 -HytalePath "D:\Games\Hytale"
-   ```
-
-   The optional local speech models download too unless you pass `-SkipModels`;
-   Deepgram works without them. Use `-SkipKokoro` to keep Parakeet STT but skip
-   the Kokoro model.
-
-3. Run `start.bat`, open <http://127.0.0.1:8788>, and paste your API keys
-   (including Deepgram) into the settings page. Save the settings.
-4. Start Hytale. The installer sets the plugin's config paths as user
-   environment variables, so restart Hytale once after the first install.
-5. In game, talk to Laya in chat or use `/laya`.
-
-See [INSTALL.md](INSTALL.md) for manual setup, the required `laya.cpp` engine,
-troubleshooting, and `reset-data.ps1` for a clean inventory, memory, and
-appearance.
 
 ## How it works
 
