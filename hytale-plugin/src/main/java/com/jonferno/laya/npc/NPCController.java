@@ -2689,7 +2689,10 @@ public class NPCController {
                         // Follow-ring recovery is follow-phased; task phases own their own
                         // recovery (reach-timeout + the abandonment check above). Gating on
                         // taskLive also stops the stale follow point yanking her off the block.
-                        if (!taskLive && !motionLocked
+                        // A "stay" is not stuck: her whole job is not moving, so the player
+                        // walking away must never teleport her to their side (measured
+                        // 2026-10-26 on a fresh install: two teleports 6 s after "hold here").
+                        if (!taskLive && !staying && !motionLocked
                             && (slotDist > STUCK_MIN_SLOT_DISTANCE
                                 || dist > FOLLOW_CATCHUP_DISTANCE)) {
                             boolean moved = Math.abs(l.x - lastX) > STUCK_EPSILON

@@ -16,6 +16,13 @@
   <strong>Tested on Hytale 0.7.4.</strong>
 </p>
 
+## What's new in 0.4.1
+
+- **"Hold here" actually holds.** She no longer teleports to you once you walk past
+  32 blocks, and the stuck watchdog no longer treats standing still as stuck.
+- **Revive messages use her name.** Rename her in Settings and the downed, pickup and
+  recovered lines follow, instead of always saying "Laya".
+
 ## What's new in 0.4.0
 
 - **Harvesting.** She reaps ripe crops with the engine's own harvest call, tells
@@ -314,11 +321,11 @@ Hytale world state, speech, actions
 - `config/blocks.json`: player words to Hytale block names.
 - `config/hytale-knowledge.json`: compact game-knowledge reference.
 - `config/laya-persona.txt`: Laya's persona and response contract.
-- `dist/LayaPlugin-0.4.0.jar`: convenience plugin build.
+- `dist/LayaPlugin-0.4.1.jar`: convenience plugin build.
 
 ## Build the plugin
 
-The repository ships `dist/LayaPlugin-0.4.0.jar`. It is built against the 0.7.x
+The repository ships `dist/LayaPlugin-0.4.1.jar`. It is built against the 0.7.x
 server API and is **tested on Hytale 0.7.4**. If Hytale changes its API again,
 rebuild from source:
 

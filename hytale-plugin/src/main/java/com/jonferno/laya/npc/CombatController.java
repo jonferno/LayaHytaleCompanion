@@ -85,7 +85,7 @@ import java.nio.file.Paths;
  */
 class CombatController {
 
-    /** Spec section 9: a stay anchor farther than this from the player is stale. */
+    /** A stay anchor farther than this from the player earns one log line, nothing more. */
     private static final double STAY_ANCHOR_RELEASE_DISTANCE = 32.0;
     /** Within this of the anchor the hold is re-armed (engine holds her in place). */
     private static final double STAY_ANCHOR_ARRIVED_DISTANCE = 0.5;
@@ -189,12 +189,22 @@ class CombatController {
     private static final float DOWNED_HP = 1f;
     /** An out-of-range press is logged once per press, not once per tick. */
     private static final long REVIVE_OUT_OF_RANGE_LOG_MS = 500;
-    /** Exact chat lines (spec section 6) - a mistyped string is a failed cycle. */
-    private static final String DOWNED_WARNING =
-        "Laya is down! Hold your interact key beside her for 10 seconds to pick her up.";
-    private static final String REVIVE_START_CHAT = "Picking Laya up... (10s)";
+    /** Exact chat lines use the configured companion name; these are the fallbacks. */
+    private String companionName() {
+        String n = owner.getCompanionName();
+        return n == null || n.isBlank() ? "Laya" : n;
+    }
+    private String downedWarning() {
+        return companionName()
+            + " is down! Hold your interact key beside her for 10 seconds to pick her up.";
+    }
+    private String reviveStartChat() {
+        return "Picking " + companionName() + " up... (10s)";
+    }
+    private String reviveDoneChat() {
+        return companionName() + " is back on her feet.";
+    }
     private static final String REVIVE_CANCEL_CHAT = "Pickup interrupted.";
-    private static final String REVIVE_DONE_CHAT = "Laya is back on her feet.";
     /**
      * Task 7 persistence (spec section 6): {"hp","downed","saved_at"}. An absent file
      * means hp 100, not downed. Boot restore happens in ensureSpawned.
@@ -329,6 +339,9 @@ class CombatController {
      * new anchor is recorded.
      */
     private boolean stayAnchorHeld = false;
+
+    /** One "stay anchor held, player far away" log line per stay. */
+    private boolean stayAnchorFarLogged = false;
 
     // --- Task 7: downed + revive state (world-thread only, except where noted) ---
     /**
@@ -1061,6 +1074,7 @@ class CombatController {
         lastStayAnchor = anchor == null ? null : new Vector3d(anchor);
         stayWalkLogged = false;    // a fresh anchor always needs a fresh return walk
         stayAnchorHeld = false;
+        stayAnchorFarLogged = false;
     }
 
     /** The stored stay anchor, or null when she is not holding a spot. */
@@ -1076,9 +1090,10 @@ class CombatController {
      *    plus a repath, so the role's Seek walks her home;
      *  - once she is within 0.5 blocks the slot is sentineled with
      *    {@link NPCController#CLEARED_POSITION} again so the engine holds her there;
-     *  - if the player is more than 32 blocks away the anchor is stale — she is
-     *    teleported to the player's side instead (the watchdogs' {@code +1.5, 0, +1.5}
-     *    offset) and the anchor is cleared.
+     *  - if the player is more than 32 blocks away, one log line records it and the
+     *    anchor still holds. Stay is absolute: she does not follow the player, and she
+     *    does not get teleported to them (that turned "hold here" into a 32-block timer,
+     *    measured 2026-10-26 on a fresh install).
      *
      * Any non-stay stance needs nothing here: the follow-ring anchor re-arms itself
      * (bootstrap / stay-clear / leash / move_to all null it, and the ring recomputes
@@ -1092,15 +1107,13 @@ class CombatController {
         final Vector3d anchor = lastStayAnchor;
 
         if (playerPos != null && distToPlayer > STAY_ANCHOR_RELEASE_DISTANCE) {
-            // Stale anchor: the normal leash / catch-up applies instead (spec section 9).
-            if (teleportToPlayerSide(playerPos)) {
-                LayaPlugin.log("Combat: stay anchor stale (player "
-                    + String.format("%.1f", distToPlayer) + " blocks away) — leashed to player");
-                lastStayAnchor = null;
-                stayWalkLogged = false;
-                stayAnchorHeld = false;
+            // Stay is absolute. The old code teleported her to the player past 32 blocks,
+            // which is exactly the "hold here, then she appears next to me" bug.
+            if (!stayAnchorFarLogged) {
+                stayAnchorFarLogged = true;
+                LayaPlugin.log("Combat: stay anchor held (player "
+                    + String.format("%.1f", distToPlayer) + " blocks away), not leashing");
             }
-            return;
         }
 
         final double adx = anchor.x - layaPos.x;
@@ -1931,7 +1944,7 @@ class CombatController {
         playStatusAnimation(STATUS_DEATH_ANIM);
         saveState();
         owner.pokeHud();                   // Task 3: downed shows immediately, not in 500 ms
-        owner.sayToPlayer(DOWNED_WARNING);
+        owner.sayToPlayer(downedWarning());
     }
 
     /**
@@ -1982,7 +1995,7 @@ class CombatController {
 
     /**
      * Interact Use beside the downed Laya (spec section 6). Inside the 3-block ring it
-     * starts the channel (chat {@link #REVIVE_START_CHAT}, log {@code Combat: revive
+     * starts the channel (chat {@code reviveStartChat()}, log {@code Combat: revive
      * start}) or, if already channelling, just refreshes the literal-hold stamp. Outside
      * the ring nothing is started and the out-of-range line is logged once per press, so
      * the prompt behaviour near her stays usable.
@@ -2005,7 +2018,7 @@ class CombatController {
             channeling = true;
             channelStartMs = now;
             LayaPlugin.log("Combat: revive start");
-            owner.sayToPlayer(REVIVE_START_CHAT);
+            owner.sayToPlayer(reviveStartChat());
         }
         return true;
     }
@@ -2028,7 +2041,7 @@ class CombatController {
 
     /**
      * The channel finished: she stands up (spec section 6). Chat
-     * {@link #REVIVE_DONE_CHAT}, HP {@link #REVIVE_HP}, {@code downed=false}, stance
+     * {@code reviveDoneChat()}, HP {@link #REVIVE_HP}, {@code downed=false}, stance
      * {@code follow}, Death pose cleared, persisted, log {@code Combat: revived hp=50}.
      * Combat does NOT auto-engage afterwards — re-issuing attack/defend is the player's
      * choice.
@@ -2049,7 +2062,7 @@ class CombatController {
         stanceReleasePending = false;
         saveState();
         owner.pokeHud();                   // Task 3: the card leaves DOWNED immediately
-        owner.sayToPlayer(REVIVE_DONE_CHAT);
+        owner.sayToPlayer(reviveDoneChat());
         LayaPlugin.log("Combat: revived hp=" + (int) REVIVE_HP);
     }
 

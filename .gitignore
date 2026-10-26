@@ -23,3 +23,6 @@ __pycache__/
 .env
 .idea/
 .vscode/
+
+# Raw banner source; assets/banner.jpg is the web-sized one that ships
+assets/readmebanner.jpg
