@@ -16,22 +16,35 @@
 
 ## 2. Install the required laya.cpp engine
 
-`laya.cpp` is not optional. The bridge refuses to start without it.
+`laya.cpp` is not optional, and you no longer download it by hand: the installer
+fetches the right build for your GPU.
 
-1. Download a Windows Vulkan build from
-   <https://github.com/lkarlslund/laya.cpp/releases>.
-2. Put the executable and the `typed-decisions` checkpoint in
-   `ai-bridge\laya\`.
-3. Confirm the layout looks like this:
+When it asks, pick a backend:
 
-   ```text
-   ai-bridge\laya\
-     laya-r*-windows-amd64-vulkan.exe
-     typed-decisions\
-   ```
+- **Vulkan**: NVIDIA, AMD or Intel (about 77 MB)
+- **CUDA 13**: NVIDIA with a current driver, the fastest option (about 263 MB plus two DLLs)
+- **CUDA 12**: V100 or an older NVIDIA driver (about 296 MB plus two DLLs)
 
-The installer validates both paths and stops with a clear error if either is
-missing.
+It places the engine and the `typed-decisions` checkpoint (about 800 MB) in
+`ai-bridge\laya\`:
+
+```text
+ai-bridge\laya\
+  laya-r*-windows-amd64-vulkan.exe    (or -cuda13.exe / -cuda12.exe)
+  typed-decisions\
+```
+
+To fetch or switch the engine yourself, run the same downloader the installer uses:
+
+```powershell
+python download-laya.py --backend vulkan
+python download-laya.py --backend cuda13
+python download-laya.py --backend cuda12 --skip-model
+```
+
+It resumes interrupted downloads, verifies the release checksum, skips files that
+are already present, and points `config\bridge-config.json` at the build you
+chose (including the correct backend flag).
 
 ## 3. Run the installer
 
@@ -47,6 +60,12 @@ Useful options:
 # Hytale is somewhere other than D:\Games\Hytale
 .\install.ps1 -HytalePath "C:\Games\Hytale"
 
+# Choose the GPU backend without being asked (vulkan, cuda13, cuda12, skip)
+.\install.ps1 -LayaBackend cuda13
+
+# Keep an existing typed-decisions checkpoint
+.\install.ps1 -LayaBackend vulkan -SkipLayaModel
+
 # Skip the optional ~1 GB local speech models (Deepgram still works)
 .\install.ps1 -SkipModels
 
@@ -59,7 +78,8 @@ Useful options:
 
 The installer:
 
-1. Validates the required `laya.cpp` executable and checkpoint.
+1. Downloads the selected `laya.cpp` build and the `typed-decisions` checkpoint,
+   or validates the ones already in `ai-bridge\laya`.
 2. Finds `UserData\Mods` under your Hytale folder.
 3. Copies `dist\LayaPlugin-*.jar` into that folder.
 4. Creates `config\bridge-config.json` from the example with **empty API keys**.

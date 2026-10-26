@@ -21,6 +21,8 @@
 - **Harvesting.** She reaps ripe crops with the engine's own harvest call, tells
   plain from Eternal crops, and replants from her pack ("harvest the carrots",
   "harvest all in the 100x100").
+- **One-step installer.** It now downloads `laya.cpp` for you. Pick Vulkan, CUDA 13
+  or CUDA 12 and it fetches the engine plus the checkpoint.
 - **Smarter gathering.** Hints match whole words against real item names, so "corn"
   finds corn and not a corner; every gathered block gives its true drop; a crop
   reports its real name ("Mature Wheat") instead of an asset key.
@@ -220,7 +222,8 @@ need those models.
 - Windows 10/11
 - Hytale 0.7.x
 - Python 3.11
-- A Windows Vulkan build of `laya.cpp` plus the `typed-decisions` checkpoint
+- A GPU laya.cpp can use: Vulkan (NVIDIA, AMD, Intel) or CUDA 12/13 on NVIDIA.
+  The installer downloads the matching build and the `typed-decisions` checkpoint.
 - Java 25 only if you build the plugin yourself
 - **Free Groq API key**: [create one here](https://console.groq.com/keys)
 - **Free z.ai API key**: [create one here](https://z.ai/manage-apikey/apikey)
@@ -241,30 +244,39 @@ billed per token by NanoGPT.
    cd LayaHytaleCompanion
    ```
 
-2. Install the required `laya.cpp` engine:
+2. Run the installer. It downloads the required `laya.cpp` engine for you:
 
-   1. Download a Windows Vulkan build and the `typed-decisions` checkpoint from
-      <https://github.com/lkarlslund/laya.cpp/releases>.
-   2. Put the `.exe` and `typed-decisions/` folder under `ai-bridge\laya\`.
-   3. The installer and bridge both refuse to continue without them.
+   1. Double-click `install.bat`, or run:
 
-3. Double-click `install.bat`, or run:
+      ```powershell
+      powershell -ExecutionPolicy Bypass -File .\install.ps1
+      ```
+
+   2. Pick your GPU backend when it asks:
+
+      - **Vulkan** works on NVIDIA, AMD and Intel (about 77 MB)
+      - **CUDA 13** is fastest on a current NVIDIA driver (about 263 MB)
+      - **CUDA 12** for a V100 or an older NVIDIA driver (about 296 MB)
+
+   3. It fetches the engine plus the `typed-decisions` checkpoint (about 800 MB)
+      into `ai-bridge\laya\`, copies the plugin JAR, creates a local config with
+      **empty keys**, and installs the Python dependencies.
+
+   Unattended installs can pass the choice and skip prompts:
 
    ```powershell
-   powershell -ExecutionPolicy Bypass -File .\install.ps1
+   .\install.ps1 -LayaBackend cuda13 -HytalePath "D:\Games\Hytale"
    ```
 
-   The installer asks for your Hytale folder (usually `D:\Games\Hytale`),
-   copies the plugin JAR, creates a local config with **empty keys**, and
-   installs the Python dependencies. It downloads the optional local speech
-   models unless you pass `-SkipModels`; Deepgram works without them. Use
-   `-SkipKokoro` to keep Parakeet STT but skip the Kokoro model.
+   The optional local speech models download too unless you pass `-SkipModels`;
+   Deepgram works without them. Use `-SkipKokoro` to keep Parakeet STT but skip
+   the Kokoro model.
 
-4. Run `start.bat`, open <http://127.0.0.1:8788>, and paste your API keys
+3. Run `start.bat`, open <http://127.0.0.1:8788>, and paste your API keys
    (including Deepgram) into the settings page. Save the settings.
-5. Start Hytale. The installer sets the plugin's config paths as user
+4. Start Hytale. The installer sets the plugin's config paths as user
    environment variables, so restart Hytale once after the first install.
-6. In game, talk to Laya in chat or use `/laya`.
+5. In game, talk to Laya in chat or use `/laya`.
 
 See [INSTALL.md](INSTALL.md) for manual setup, the required `laya.cpp` engine,
 troubleshooting, and `reset-data.ps1` for a clean inventory, memory, and

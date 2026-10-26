@@ -118,16 +118,15 @@ def load_config():
         "tts_enabled": True,
         "parakeet_model": str(MODELS_DIR / "parakeet-tdt-0.6b-v2"),
         "decision_engine": "laya",
-        "laya_binary": str(BASE_DIR / "laya" / "laya-r-windows-amd64-vulkan.exe"),
+        # laya.cpp: the installer records the chosen build here. Both keys may be
+        # empty, in which case the newest laya-*-windows-amd64-*.exe in
+        # ai-bridge/laya is used, so switching between Vulkan and CUDA needs no
+        # code change. The backend flag is matched to the executable name at
+        # startup (see _normalize_laya_args).
+        "laya_binary": "",
         "laya_checkpoint": str(BASE_DIR / "laya" / "typed-decisions"),
-        # Task 3: the bridge owns the resident laya.cpp server lifecycle.
-        # Verified command line (Task 1) is plain --vulkan; no --tensor-core-fp32.
-        "laya_server_exe": str(BASE_DIR / "laya" / "laya-r0004-windows-amd64-vulkan.exe"),
-        "laya_server_args": [
-            "--vulkan", "--server",
-            "--host", "127.0.0.1", "--port", "8090",
-            "--model", str(BASE_DIR / "laya" / "typed-decisions"),
-        ],
+        "laya_server_exe": "",
+        "laya_server_args": [],
         "persona_prompt": str(BASE_DIR.parent / "config" / "laya-persona.txt"),
         # Task 4: personality trait layer appended to the base persona. Unknown
         # or missing values fall back to "default" (no layer).
@@ -231,11 +230,50 @@ def _require_laya_engine_config() -> None:
         )
 
 
+def _find_laya_exe(directory: Path | None = None) -> Path | None:
+    """Newest laya.cpp Windows executable in the engine folder, any backend."""
+    d = Path(directory) if directory is not None else BASE_DIR / "laya"
+    if not d.is_dir():
+        return None
+    exes = sorted(d.glob("laya-*-windows-amd64-*.exe"),
+                  key=lambda p: p.stat().st_mtime, reverse=True)
+    return exes[0] if exes else None
+
+
+def _laya_exe_path() -> Path:
+    """Configured executable when it exists, else the newest build on disk."""
+    configured = str(CFG.get("laya_server_exe") or CFG.get("laya_binary") or "")
+    if configured and Path(configured).is_file():
+        return Path(configured)
+    found = _find_laya_exe()
+    if found is not None:
+        return found
+    return Path(configured) if configured else BASE_DIR / "laya" / "laya-r0004-windows-amd64-vulkan.exe"
+
+
+def _normalize_laya_args(exe: str | Path, args: list) -> list:
+    """Make the backend flag match the executable's build.
+
+    A Vulkan build needs `--vulkan`; a CUDA build is CUDA unless told otherwise,
+    so a leftover `--vulkan` makes it ask for a Vulkan device and fail. The
+    installer can switch backends without anyone editing config by hand.
+    """
+    import os as _os
+
+    name = _os.path.basename(str(exe)).lower()
+    out = [str(a) for a in args]
+    has_backend = any(a in ("--vulkan", "--cuda", "--coreml", "--cpu") for a in out)
+    if "vulkan" in name:
+        if not has_backend:
+            out.insert(0, "--vulkan")
+    elif "cuda" in name:
+        out = [a for a in out if a != "--vulkan"]
+    return out
+
+
 def _required_laya_paths() -> tuple[Path, Path]:
     """Return the required binary and checkpoint, raising a clear error if absent."""
-    exe = Path(str(CFG.get("laya_server_exe")
-                   or CFG.get("laya_binary")
-                   or BASE_DIR / "laya" / "laya-r0004-windows-amd64-vulkan.exe"))
+    exe = _laya_exe_path()
     checkpoint = Path(str(CFG.get("laya_checkpoint")
                          or BASE_DIR / "laya" / "typed-decisions"))
     if not exe.is_file():
@@ -257,23 +295,21 @@ def _laya_server_log_path() -> Path:
 def _laya_server_cmd() -> list:
     """Build the argv for the resident server from config.
 
-    Falls back to the Task 1 proven defaults when the config keys are absent,
-    so a config without the new keys still starts the same server.
+    Falls back to the proven defaults when the config keys are absent, and always
+    makes the backend flag match the executable (Vulkan build vs CUDA build).
     """
-    exe = str(CFG.get("laya_server_exe")
-              or CFG.get("laya_binary")
-              or BASE_DIR / "laya" / "laya-r0004-windows-amd64-vulkan.exe")
-    args = CFG.get("laya_server_args") or []
+    exe = str(_laya_exe_path())
+    args = [str(a) for a in (CFG.get("laya_server_args") or [])]
     if not args:
         url = str(CFG.get("laya_server_url", LAYA_SERVER_URL_DEFAULT))
         port = url.rsplit(":", 1)[-1].split("/")[0] or "8090"
         args = [
-            "--vulkan", "--server",
+            "--server",
             "--host", "127.0.0.1", "--port", port,
             "--model", str(CFG.get("laya_checkpoint")
                            or BASE_DIR / "laya" / "typed-decisions"),
         ]
-    return [exe] + [str(a) for a in args]
+    return [exe] + _normalize_laya_args(exe, args)
 
 
 def _laya_server_health(url: str, timeout: float = 2.0):
@@ -703,7 +739,7 @@ _MIN_SENTENCE_CHARS = 2
 
 def _speakable_text(raw: str, final: bool = False) -> str:
     """Return only the text that would be *spoken* for a partially-received
-    reply — i.e. ``clean_speech(raw)[0]`` computed on a prefix of the stream.
+    reply, i.e. ``clean_speech(raw)[0]`` computed on a prefix of the stream.
 
     This mirrors ``clean_speech``'s say-accumulation exactly (a ``say:`` line
     opens the speech block; every other control key closes it; plain lines
@@ -724,7 +760,7 @@ def _speakable_text(raw: str, final: bool = False) -> str:
     for idx, line in enumerate(lines):
         s = line.strip()
         # Hold the trailing partial line while it could still become a control
-        # key — in BOTH the say block and the fallback below.
+        # key, in BOTH the say block and the fallback below.
         if idx == len(lines) - 1 and held_last:
             continue
         key, sep, rest = s.partition(":")
@@ -809,7 +845,7 @@ class _StreamTts:
     captured by the callback closure, so concurrent turns never share mutable
     state (no module globals).
 
-    Note: as shipped, per-sentence synthesis is NOT used — capture.py can only
+    Note: as shipped, per-sentence synthesis is NOT used: capture.py can only
     play a single full clip, so a per-sentence path would add cost with no gain
     (see MODLOG). This class is retained as the groundwork for a future
     capture.py partial-audio channel.
@@ -1099,7 +1135,7 @@ class CloudLLMHandler:
                 body = resp.text[:300]
                 if resp.status_code == 429 and ("Insufficient balance" in body or '"1113"' in body):
                     self.cooldowns[provider["name"]] = (time.time() * 1000) + 3600000
-                    log("zai: account unfunded (insufficient balance) — cooldown 1h")
+                    log("zai: account unfunded (insufficient balance), cooldown 1h")
                     return None
                 if resp.status_code in (401, 403):
                     log(f"zai {model}: auth failed ({resp.status_code})")
@@ -1175,7 +1211,7 @@ class CloudLLMHandler:
                     # If the stream completed but was genuinely empty (a
                     # reasoning model exhausting max_tokens), a second
                     # non-streaming call to the SAME model only repeats the same
-                    # cost — skip straight to the next model. Retry non-streamed
+                    # cost, so skip straight to the next model. Retry non-streamed
                     # only when the stream never established.
                     if not stream_ok:
                         result = await self._call_groq_single(provider, model, messages)
@@ -1292,7 +1328,7 @@ class CloudLLMHandler:
                     # spoken prefix while it is in say-mode. If it ever does not
                     # start with what we already spoke (a fallback-branch flip),
                     # stop streaming sentences rather than ever re-speaking or
-                    # mis-speaking — the voice path still synthesizes the final
+                    # mis-speaking, and the voice path still synthesizes the final
                     # say_line in full.
                     speakable = _speakable_text(content)
                     if not speakable.startswith(consumed):
@@ -1373,7 +1409,7 @@ LLM = CloudLLMHandler()
 
 # Fix cycle 1: gemini-1.5-flash is retired (404 on generateContent).
 # Fix cycle 4: gemini-flash-latest now points at gemini-3.8-flash, whose free
-# tier is 20 requests/day — one exhausted it and took vision down for 15 h.
+# tier is 20 requests/day; one exhausted it and took vision down for 15 h.
 # gemini-3.1-flash-lite measured 2.7 s for a full description, and the fallback
 # below covers that model's quota too (the limits are per model per day).
 VISION_MODEL = "gemini-3.1-flash-lite"
@@ -3074,7 +3110,7 @@ async def run_chat(player: str, message: str, state: dict, with_audio: bool,
         # on typed turns too. Audio is ALWAYS synthesized as one full clip (see the
         # TTS block below): capture.py can only play a single full clip, so
         # per-sentence synthesis would add cost with no gain. All streaming turn
-        # state lives in the `_on_sentence` closure — no module-global mutable state.
+        # state lives in the `_on_sentence` closure, with no module-global mutable state.
         t_stream_first = [None]
         stream_sentences: list[str] = []
         streaming = bool(CFG.get("llm_stream"))
