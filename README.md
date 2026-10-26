@@ -5,7 +5,7 @@
 <h1 align="center">LayaHytaleCompanion</h1>
 
 <p align="center">
-  A local-first AI companion for Hytale: she follows, talks, remembers, mines,
+  A 100% Free AI powered companion for Hytale: it follows, talks, remembers, mines,
   gathers, farms, harvests, and fights beside you.
 </p>
 
