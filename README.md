@@ -25,13 +25,12 @@
 - **Free farming.** "Keep farming until I say stop" lays out flat 5x5 plots with a
   two-block gap, levels the ground by breaking grass, dirt and stone, plants every seed
   kind she carries, and keeps tilling new plots once the seeds run out.
-- **Only the good stuff.** "Gather only premium" limits mining and gathering to Uncommon
-  quality and above; "anything" clears it.
 - **Any block, any wording.** "You are free to go mine this", "free roam mining" and
   named blocks such as marble or copper all use the same path.
-- **Companion on the map.** A marker follows her position and name on the world map.
 - **Safer mining.** The unstick no longer teleports her inside a block, and an unreachable
   block is dropped instead of ending the whole order.
+- **Auto-update.** The launcher (`start.bat`) and `install.bat` check GitHub and update the
+  plugin and bridge files for you, with a backup of what they replace.
 - **Fixes.** Attack orders send the creature name ("kill that rabbit" now targets the
   rabbit), task reports count only the requested block and separate stone from ore, and
   stopped tasks get a personality line instead of the same sentence every time.

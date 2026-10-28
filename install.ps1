@@ -12,6 +12,16 @@ param(
 $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
 
+# 0.4.3: same GitHub update check as the launcher, so a reinstall also refreshes
+# the plugin and bridge. Set LAYA_NO_UPDATE=1 to skip it.
+if ($env:LAYA_NO_UPDATE -ne "1" -and (Test-Path (Join-Path $Root "update.ps1"))) {
+    try {
+        & (Join-Path $Root "update.ps1") -Root $Root
+    } catch {
+        Write-Host "  Update check skipped: $($_.Exception.Message)"
+    }
+}
+
 function Write-Step([string]$Text) {
     Write-Host ""
     Write-Host "== $Text ==" -ForegroundColor Cyan
