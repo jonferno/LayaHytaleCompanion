@@ -18,9 +18,6 @@
 
 ## What's new in 0.4.2
 
-- **You can see her think.** On a reply that runs past a second, her nameplate
-  animates `.` `..` `...` with a small head tilt, so a slow answer never looks like
-  she ignored you.
 - **Downed bodies stop drawing aggro.** Enemies that were fighting her drop her the
   moment she goes down and keep ignoring her body, so no more free kills on a corpse.
 - **Wood is wood.** "Chop this tree" always counts as a felling order and shows the
