@@ -31,7 +31,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel
 
-from stance import stance_intent, stance_ack, STANCE_ACKS, task_done_line
+from stance import stance_intent, stance_ack, STANCE_ACKS, task_done_line, named_target
 from gearcheck import asks_about_gear
 from farming import (detect_farm, farm_ack, seed_kind, is_kind_answer,
                      count_from_message, detect_harvest, wants_no_replant,
@@ -55,7 +55,7 @@ SKIN_FIELDS = (
     "skinFeature", "gloves", "cape",
 )
 
-app = FastAPI(title="Laya AI Bridge", version="0.4.2")
+app = FastAPI(title="Laya AI Bridge", version="0.4.3")
 
 
 @app.middleware("http")
@@ -786,7 +786,7 @@ def _speakable_text(raw: str, final: bool = False) -> str:
         if held_last and plain and plain[-1].lower() == lines[-1].strip().lower():
             plain = plain[:-1]
         say = " ".join(plain).strip()
-    return say
+    return strip_speech_markup(say)
 
 
 def _is_control_prefix(s: str) -> bool:
@@ -1737,6 +1737,58 @@ WOOD_HINTS = ("wood", "oak", "birch", "spruce", "palm")
 ALL_COUNT_CUES = ("everything", "as much", "as many", "around us", "around here",
                   "the area", "in the area", "until i say", "don't stop", "dont stop",
                   "keep going", "the rest")
+
+# Free mode (0.4.3): keep working until an explicit stop, instead of finishing when
+# the area is empty. Farming/harvesting keep their own cell plans.
+FREE_CUES = ("until i say stop", "until i tell you", "until you say stop", "free to", "freely", "free roam", "roam",
+             "until i say", "don't stop", "dont stop", "never stop",
+             "keep going", "keep mining", "keep gathering", "keep chopping",
+             "keep cutting", "keep at it")
+
+# Quality floor for the block's own drop. Hytale quality ids: 0 Junk, 1 Common,
+# 2 Uncommon, 3 Rare, 4 Epic, 5 Legendary.
+PREMIUM_CUES = ("premium", "high quality", "high-quality", "best quality",
+                "good quality", "top quality", "rare or better", "uncommon or better",
+                "only the good stuff")
+
+
+def wants_free_mode(message: str) -> bool:
+    text = (message or "").lower()
+    if _FREE_STOP_RE.search(text):
+        return True
+    if re.search(r"\b(?:until|till)\s+(?:i|you)\b[^.!?]*\b(?:say|stop|otherwise)\b", text):
+        return True
+    if re.search(r"\b(?:don'?t|do not|never)\s+stop\b", text):
+        return True
+    return any(c in text for c in FREE_CUES)
+
+
+_FREE_STOP_RE = re.compile(
+    r"\b(?:until|till)\s+(?:i|you)\s+(?:\w+\s+){0,3}stop\b", re.I)
+
+
+def strip_free_clauses(message: str) -> str:
+    """Drop 'until I say stop' style tails before imperative parsing.
+
+    Without this the word "stop" made _NEGATIVE reject the whole order, so
+    "keep mining stone until I say stop" never reached a task (measured 2026-10-28).
+    """
+    text = _FREE_STOP_RE.sub(" ", message or "")
+    # Any "until/till ..." tail is a stop condition, not part of the resource name:
+    # "mine marble until I say so" was sending hint="marble until say".
+    text = re.sub(r"\b(?:until|till)\b.*$", " ", text, flags=re.I)
+    text = re.sub(r"\buntil\s+i\s+say\s+otherwise\b", " ", text, flags=re.I)
+    text = re.sub(r"\b(?:don'?t|do not|never)\s+stop\b", " ", text, flags=re.I)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def quality_floor(message: str) -> int:
+    """0 = any quality; 2 = Uncommon and above (Jon's definition, 2026-10-28)."""
+    text = (message or "").lower()
+    if any(c in text for c in ("anything", "whatever", "any quality",
+                               "don't care", "dont care")):
+        return 0
+    return 2 if any(c in text for c in PREMIUM_CUES) else 0
 STOP_TASK_CUES = ("stop mining", "stop gathering", "stop digging", "stop it",
                   "never mind", "nevermind", "nvm",
                   "stop chopping", "stop cutting", "stop breaking", "quit chopping",
@@ -1790,7 +1842,7 @@ def _task_imperative_rest(text: str):
     rest = text[request.end():] if request else text
     # Polite/filler prefixes.
     while True:
-        m = re.match(r"^(?:please|go|now|ok|okay|alright|just|hey|ay|yo|uh|um|so|well)\s+", rest)
+        m = re.match(r"^(?:please|go|now|ok|okay|alright|just|hey|ay|yo|uh|um|so|well|free|freely)\s+", rest)
         if not m:
             break
         rest = rest[m.end():]
@@ -1893,6 +1945,8 @@ def detect_task(message: str):
     small number between them. That keeps conversational mentions such as
     "aren't you getting bored of mining copper" out of the task leg.
     """
+    free = wants_free_mode(message or "")
+    message = strip_free_clauses(message or "")
     raw = (message or "").lower()
     # Spoken commands often put the verb last: "there is a stone here, mine it".
     if ("?" not in raw and not _QUESTION_START.match(raw)
@@ -1931,6 +1985,9 @@ def detect_task(message: str):
     verb = verb_match.group(1) if verb_match else ""
     if not verb_match:
         return None, None   # "kill those goats" is a stance, never a task
+    tail = rest[verb_match.end():].strip()
+    if tail in ("this", "that", "it", "these", "those"):
+        return ("mine" if verb in ("mine", "dig") else "gather"), "aimed"
     m = pattern.match(rest)
     if m:
         hint = HINT_ALIASES.get(m.group(1), m.group(1))
@@ -1947,6 +2004,10 @@ def detect_task(message: str):
             return None, None   # "get that goblin" is an attack, not a task
         task = "mine" if verb in ("mine", "dig") else "gather"
         return task, phrase
+    if free and verb in ("mine", "dig"):
+        # "mine until I say stop" names no resource. Stone is the sensible default
+        # for a pickaxe order; the ack says what she is mining.
+        return "mine", "stone"
     return None, None
 
 
@@ -2280,10 +2341,28 @@ def grounded_event_line(event: str, detail: str, personality: str = "default") -
             item = crop_word if qty == 1 else crop_word + "s"
             return task_done_line("Picked", qty, item, total, personality, kind="harvest")
         if "stopped on request" in low:
+            m = re.match(r"stopped on request;\s*(\d+)\s+(.+?)\s+finished", detail,
+                         re.IGNORECASE)
+            if m:
+                qty, item = int(m.group(1)), m.group(2).strip()
+                if re.search(r"log|wood|trunk", item, re.I):
+                    k = "wood"
+                elif re.search(r"stone|ore|copper|iron|gold|coal|rock", item, re.I):
+                    k = "mine"
+                elif re.search(r"seed", item, re.I):
+                    k = "farm"
+                else:
+                    k = "gather"
+                return task_done_line("Stopped with", qty, item, None, personality,
+                                      kind=k, reason="stopped")
             return "Stopped there - task finished."
         return "Done with that - what next?"
     if event == "task_failed":
         low = detail.lower()
+        if detail.rstrip(".").endswith("?") or low.endswith("?"):
+            # A question from her (the seed-kind prompt) is not a failure line; speak
+            # it as asked instead of "That didn't work: ... ?." (2026-10-28).
+            return detail.rstrip(".").strip()
         if low.startswith("no "):
             return f"I couldn't find {detail[3:]}."
         if "don't have" in low or "do not have" in low:
@@ -2800,6 +2879,14 @@ class TTSHandler:
             self._warm_event.set()
 
     def synthesize(self, text: str, voice: str = None, speed: float = None) -> bytes:
+        # Last line of defence: NOTHING reaches a voice engine with markup. The
+        # callers already strip (clean_speech / _speakable_text), but the voice
+        # helper, /tts and future paths all funnel through here, and Deepgram read
+        # a stray '*' as "asterisk" on voice turns (2026-10-28).
+        text = strip_speech_markup(text or "")
+        if not text:
+            return self._silent_wav(0.3)
+        log(f"TTS text: {text[:160]!r}")
         speed = speed if speed else CFG["tts_speed"]
         engine = str(CFG.get("tts_engine", "deepgram")).lower()
         if engine == "deepgram":
@@ -3059,6 +3146,9 @@ class ChatResponse(BaseModel):
     scope: Optional[str] = None
     # Requested area-clear radius in blocks (0 = plugin default).
     radius: Optional[int] = None
+    # 0.4.3: free mode (keep going until stop) and the drop-quality floor.
+    continuous: Optional[bool] = None
+    quality_min: Optional[int] = None
     audio_b64: Optional[str] = None
 
 
@@ -3135,6 +3225,29 @@ _CONTROL_KEYS = ("say", "emotion", "action", "task", "target_hint", "count",
 _CONTROL_PREFIXES = tuple(k + ":" for k in _CONTROL_KEYS)
 
 
+_MARKUP_EMPHASIS = re.compile(r"\*{1,3}(?=\S)(.+?)(?<=\S)\*{1,3}", re.S)
+# Unicode look-alikes the model occasionally uses instead of ASCII '*'.
+_UNICODE_STARS = "\u2217\u066d\u2731\u2732\u2733\u2734\u2735\u2736\u2737\u2738\u2739\u273a\uff0a"
+
+
+def strip_speech_markup(text: str) -> str:
+    """Remove markdown emphasis the model uses for tone, before chat and TTS.
+
+    The model writes things like ``*sighs*`` or ``That was *really* good``. The
+    voice engine reads each asterisk as the word "asterisk" (measured 2026-10-28),
+    so keep the words and drop the markers. Backticks go too: they are read the
+    same way. Nothing else is touched, so item names and punctuation survive.
+    """
+    if not text:
+        return text
+    out = re.sub(r"\\\*", "", text)
+    out = _MARKUP_EMPHASIS.sub(r"\1", out)
+    for ch in _UNICODE_STARS:
+        out = out.replace(ch, "")
+    out = out.replace("*", "").replace("`", "")
+    return re.sub(r"[ \t]{2,}", " ", out).strip()
+
+
 def clean_speech(raw: str) -> tuple[str, str, str]:
     """Split a model reply into (say, action, emotion) without leaking control lines.
 
@@ -3176,7 +3289,7 @@ def clean_speech(raw: str) -> tuple[str, str, str]:
             if s and not s.lower().startswith(_CONTROL_PREFIXES)
         ]
         say = " ".join(plain).strip()
-    return say, action, emotion
+    return strip_speech_markup(say), action, emotion
 
 
 async def run_chat(player: str, message: str, state: dict, with_audio: bool,
@@ -3363,6 +3476,7 @@ async def run_chat(player: str, message: str, state: dict, with_audio: bool,
         farm_count = 0
         farm_kind = ""
         harvest_count = 0
+        pending_cont = False
         if not fast and wants_stop_task(message):
             log("Guard: stop-task cue -> action=stop_task")
             action = "stop_task"
@@ -3393,6 +3507,7 @@ async def run_chat(player: str, message: str, state: dict, with_audio: bool,
                 farm_count = int(_PENDING_FARM.get("count", 0) or 0)
                 is_farm = True
                 det_farm = True
+                pending_cont = bool(_PENDING_FARM.get("continuous"))
                 log(f"Farm: kind answer '{message.strip()[:40]}' resolves the pending "
                     f"request (hint={target_hint or 'any'} kind={seed_kind(message)})")
                 _PENDING_FARM = None
@@ -3417,7 +3532,17 @@ async def run_chat(player: str, message: str, state: dict, with_audio: bool,
                     task, target_hint = det_task, det_hint or ""
                 elif det_task and not target_hint:
                     target_hint = det_hint or ""
+        if not task and wants_free_mode(message) and re.search(
+                r"\b(mine|mining|dig|digging)\b", (message or "").lower()):
+            # "you are free to go mine this" / "free roam mining": any block is fair game.
+            task = "mine"
+            target_hint = "aimed" if re.search(
+                r"\b(this|that|it)\b", (message or "").lower()) else ""
+            log(f"Free roam mine: hint={target_hint or 'any'}")
         if task in ("mine", "gather"):
+            if target_hint:
+                target_hint = re.sub(r"\b(?:until|till)\b.*$", "", target_hint).strip()
+                target_hint = re.sub(r"\s+say\s*$", "", target_hint).strip()
             task, target_hint = normalize_wood_task(task, target_hint, message)
         if task == "gather":
             # "gather everything you can find" -> the hint is filler, not a noun.
@@ -3453,13 +3578,16 @@ async def run_chat(player: str, message: str, state: dict, with_audio: bool,
         else:
             count = derive_task_count(message, task, model_count, target_hint)
         scope = derive_task_scope(message, task, target_hint, count)
+        continuous = (bool(task) and task in ("mine", "gather", "farm")
+                      and (wants_free_mode(message) or pending_cont))
         if task == "farm":
             # Farming reuses `scope` for the seed KIND (eternal|normal|"") - an existing
             # wire key rather than a new one. The plugin refuses and asks when both kinds
             # are in her pack and nothing was said.
             global _LAST_FARM
             scope = (farm_kind or seed_kind(message)) or None
-            _LAST_FARM = {"hint": target_hint or "", "count": count}
+            _LAST_FARM = {"hint": target_hint or "", "count": count,
+                          "continuous": continuous}
         if task == "harvest":
             # Harvest reuses `scope` for the REPLANT choice: on by default (the player
             # has to say "leave it bare" to turn it off), same one-existing-field trick
@@ -3470,9 +3598,14 @@ async def run_chat(player: str, message: str, state: dict, with_audio: bool,
             # "harvest all in 100x100" / "in 50x500" / "within 40 blocks" -> scan radius.
             # 0 leaves the plugin's default (16).
             radius = harvest_radius(message)
+        # Free mode: keep going until stop (mining, gathering, wood, farm). The flag
+        # may also come from a held seed-kind answer to a free farm request.
+        quality_min = quality_floor(message) if task in ("mine", "gather") else 0
         if task in ("mine", "gather"):
             log(f"Task intent: {task} hint={target_hint or '?'} count={count if count else 'all'}"
-                f" scope={scope or '-'} radius={radius or 'default'}")
+                f" scope={scope or '-'} radius={radius or 'default'}"
+                f"{' FREE' if continuous else ''}"
+                f"{' quality>=' + str(quality_min) if quality_min else ''}")
             # Cycle 11b: a forced task always speaks its own acknowledgement. The
             # model line was written before the task existed and can echo a stale
             # failure from memory; this line names what she is about to do.
@@ -3496,6 +3629,23 @@ async def run_chat(player: str, message: str, state: dict, with_audio: bool,
                 log(f"Guard: harvest ack replaces model line -> {ack}")
             say_line = ack
 
+        if continuous:
+            if task == "farm":
+                say_line = "On it - I'll keep farming until you say stop."
+            else:
+                if task == "mine":
+                    free_verb = "mining"
+                elif (target_hint or "").lower() in ("wood", "tree", "trees"):
+                    free_verb = "chopping"
+                else:
+                    free_verb = "gathering"
+                what = target_hint or "this"
+                say_line = f"On it - I'll keep {free_verb} {what} until you say stop."
+            # A task that is starting must not be cancelled by a stay/stop action
+            # the model or the stance guard chose (0.4.3: "until I say stop" was read
+            # as a stay cue and cleared the brand-new mining task).
+            action = "follow"
+
         # "Wield/switch to your battleaxe" is an equipment order even without the
         # word defend. The plugin treats defend as the guarded weapon-ready stance.
         if action != "stop_task" and wants_equip_weapon(message):
@@ -3507,7 +3657,7 @@ async def run_chat(player: str, message: str, state: dict, with_audio: bool,
         # answer "follow me" with stay (or stay put after "follow me"); the raw
         # text decides, and the spoken line confirms it. A fast command already
         # holds the same deterministic result, so only non-fast messages re-derive.
-        if not fast and action != "stop_task":
+        if not fast and action != "stop_task" and not continuous:
             guarded_action, guarded_say = apply_stance_guard(
                 message, action, say_line, state=state,
                 personality=CFG.get("personality", "default"))
@@ -3534,10 +3684,11 @@ async def run_chat(player: str, message: str, state: dict, with_audio: bool,
                 log("Guard: unprompted action=gift_hand -> follow")
                 action = "follow"
 
-        # Name-aware attack: let the plugin match a named creature ("kill those pigs")
-        # even when it is a protected passive and the crosshair is not on it.
+        # Name-aware attack: send the creature NOUN, not the sentence. The plugin
+        # matches this against NPC role names, so "kill that rabbit" as a hint was
+        # "no target" while a rabbit stood in front of her (2026-10-28).
         if action == "attack" and not task:
-            target_hint = (message or "").strip()[:120]
+            target_hint = named_target(message) or ""
 
         if not say_line:
             say_line = "I'm here."
@@ -3630,6 +3781,8 @@ async def run_chat(player: str, message: str, state: dict, with_audio: bool,
             count=count if task and task != "none" else None,
             scope=scope if task and task != "none" else None,
             radius=radius if task and task != "none" and radius else None,
+            continuous=continuous if task and task != "none" else None,
+            quality_min=quality_min if task and task != "none" and quality_min else None,
             audio_b64=audio_b64,
         )
     finally:

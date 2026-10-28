@@ -1,5 +1,16 @@
 $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
+
+# 0.4.3: check GitHub before anything starts. Non-fatal by design; set
+# LAYA_NO_UPDATE=1 to skip it.
+if ($env:LAYA_NO_UPDATE -ne "1" -and (Test-Path (Join-Path $Root "update.ps1"))) {
+    try {
+        & (Join-Path $Root "update.ps1") -Root $Root
+    } catch {
+        Write-Host "  Update check skipped: $($_.Exception.Message)"
+    }
+}
+
 $python = Get-Command python -ErrorAction SilentlyContinue
 if (-not $python) {
     throw "Python was not found on PATH. See INSTALL.md."

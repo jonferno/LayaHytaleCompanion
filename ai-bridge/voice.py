@@ -42,6 +42,21 @@ def _notify_talk(cfg, on):
         print(f"[Laya Voice] talk signal failed: {e}", flush=True)
 
 
+def _notify_action(cfg, action):
+    """Send a small plugin action (thinking_on/off) for a voice turn.
+
+    Voice turns call run_chat in-process, so they bypass ChatListener, which is
+    what normally tells the plugin to show the thinking dots. Without this the
+    indicator only ever appeared for typed chat (reported 2026-10-28).
+    """
+    try:
+        url = cfg.get("plugin_bridge_url", "http://127.0.0.1:8787/command")
+        with httpx.Client(timeout=1.5) as client:
+            client.post(url, json={"action": action})
+    except Exception as e:
+        print(f"[Laya Voice] {action} signal failed: {e}", flush=True)
+
+
 class STT:
     """Parakeet — ONNX int8 (~1 GB incl. Kokoro, no torch), lazy-warmed in background."""
 
@@ -188,18 +203,22 @@ def _talk_loop(cfg, run_chat_fn, loop):
                 continue
             print(f"[Laya Voice] You said: {text}", flush=True)
             # Direct in-process chat (no HTTP self-call)
-            fut = __import__("asyncio").run_coroutine_threadsafe(
-                run_chat_fn(player, text.strip(), {
-                    "player": {"name": player}, "nearby_entities": [],
-                    "time_of_day": "day", "laya": {"alive": True},
-                }, True, user_text_turn=True),
-                loop,
-            )
+            _notify_action(cfg, "thinking_on")
             try:
-                resp = fut.result(timeout=30)
-            except Exception as e:
-                print(f"[Laya Voice] Chat failed: {e}", flush=True)
-                continue
+                fut = __import__("asyncio").run_coroutine_threadsafe(
+                    run_chat_fn(player, text.strip(), {
+                        "player": {"name": player}, "nearby_entities": [],
+                        "time_of_day": "day", "laya": {"alive": True},
+                    }, True, user_text_turn=True),
+                    loop,
+                )
+                try:
+                    resp = fut.result(timeout=30)
+                except Exception as e:
+                    print(f"[Laya Voice] Chat failed: {e}", flush=True)
+                    continue
+            finally:
+                _notify_action(cfg, "thinking_off")
             print(f"[Laya Voice] Laya: {resp.say}", flush=True)
             # Voice turns call the LLM in-process, so they bypass ChatListener.
             # Push the SAME response to the plugin's /command surface, or she

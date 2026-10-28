@@ -16,6 +16,26 @@
   <strong>Tested on Hytale 0.7.4.</strong>
 </p>
 
+## What's new in 0.4.3
+
+- **Free mode.** "Keep mining stone until I say stop" now runs until you stop. She works
+  the stone she can see, clears the grass and dirt above buried ore, steps into the holes
+  she digs, and searches wider before moving on. Gathering and chopping use the same free
+  mode.
+- **Free farming.** "Keep farming until I say stop" lays out flat 5x5 plots with a
+  two-block gap, levels the ground by breaking grass, dirt and stone, plants every seed
+  kind she carries, and keeps tilling new plots once the seeds run out.
+- **Only the good stuff.** "Gather only premium" limits mining and gathering to Uncommon
+  quality and above; "anything" clears it.
+- **Any block, any wording.** "You are free to go mine this", "free roam mining" and
+  named blocks such as marble or copper all use the same path.
+- **Companion on the map.** A marker follows her position and name on the world map.
+- **Safer mining.** The unstick no longer teleports her inside a block, and an unreachable
+  block is dropped instead of ending the whole order.
+- **Fixes.** Attack orders send the creature name ("kill that rabbit" now targets the
+  rabbit), task reports count only the requested block and separate stone from ore, and
+  stopped tasks get a personality line instead of the same sentence every time.
+
 ## What's new in 0.4.2
 
 - **Downed bodies stop drawing aggro.** Enemies that were fighting her drop her the
@@ -37,22 +57,6 @@
   32 blocks, and the stuck watchdog no longer treats standing still as stuck.
 - **Revive messages use her name.** Rename her in Settings and the downed, pickup and
   recovered lines follow, instead of always saying "Laya".
-
-## What's new in 0.4.0
-
-- **Harvesting.** She reaps ripe crops with the engine's own harvest call, tells
-  plain from Eternal crops, and replants from her pack ("harvest the carrots",
-  "harvest all in the 100x100").
-- **One-step installer.** It now downloads `laya.cpp` for you. Pick Vulkan, CUDA 13
-  or CUDA 12 and it fetches the engine plus the checkpoint.
-- **Smarter gathering.** Hints match whole words against real item names, so "corn"
-  finds corn and not a corner; every gathered block gives its true drop; a crop
-  reports its real name ("Mature Wheat") instead of an asset key.
-- **New HUD icons** for attack, defend, follow, stay, gather, mine, chop, farm and
-  downed, all from one source set with consistent centring and weight.
-- **Fixes** across the board: planted crops were invisible to the scan on generated
-  per-stage block types, "gather everything" was treated as a noun, and the
-  interact page had dead space on the right.
 
 ## Why is she called Laya?
 
@@ -336,11 +340,11 @@ Hytale world state, speech, actions
 - `config/blocks.json`: player words to Hytale block names.
 - `config/hytale-knowledge.json`: compact game-knowledge reference.
 - `config/laya-persona.txt`: Laya's persona and response contract.
-- `dist/LayaPlugin-0.4.2.jar`: convenience plugin build.
+- `dist/LayaPlugin-0.4.3.jar`: convenience plugin build.
 
 ## Build the plugin
 
-The repository ships `dist/LayaPlugin-0.4.2.jar`. It is built against the 0.7.x
+The repository ships `dist/LayaPlugin-0.4.3.jar`. It is built against the 0.7.x
 server API and is **tested on Hytale 0.7.4**. If Hytale changes its API again,
 rebuild from source:
 

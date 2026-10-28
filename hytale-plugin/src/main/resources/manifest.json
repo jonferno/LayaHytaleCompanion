@@ -1,7 +1,7 @@
 {
     "Group": "Jonferno",
     "Name": "LayaPlugin",
-    "Version": "0.4.2",
+    "Version": "0.4.3",
     "Description": "Laya - an AI companion with a reflex layer and a brain",
     "Authors": [
         {

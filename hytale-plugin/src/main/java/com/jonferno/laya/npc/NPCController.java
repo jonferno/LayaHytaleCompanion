@@ -18,7 +18,6 @@ import com.hypixel.hytale.server.core.asset.type.blocktype.config.SoftBlockDropT
 import com.hypixel.hytale.server.core.Message;
 import com.hypixel.hytale.server.core.entity.entities.Player;
 import com.hypixel.hytale.server.core.entity.AnimationUtils;
-import com.hypixel.hytale.server.core.entity.nameplate.Nameplate;
 import com.hypixel.hytale.server.core.entity.entities.player.windows.ContainerWindow;
 import com.hypixel.hytale.server.core.event.events.player.PlayerInteractEvent;
 import com.hypixel.hytale.server.core.inventory.Inventory;
@@ -34,6 +33,10 @@ import com.hypixel.hytale.protocol.packets.entities.PlayAnimation;import com.hyp
 import com.hypixel.hytale.server.core.modules.time.WorldTimeResource;
 import com.hypixel.hytale.server.core.util.TargetUtil;
 import com.hypixel.hytale.server.core.cosmetics.CosmeticsModule;
+import com.hypixel.hytale.server.npc.role.support.DisplayNameSupport;
+import com.hypixel.hytale.server.core.universe.world.worldmap.markers.MapMarkerBuilder;
+import com.hypixel.hytale.protocol.packets.worldmap.MapMarker;
+import com.hypixel.hytale.math.vector.Transform;
 import com.hypixel.hytale.server.core.modules.entity.player.PlayerCreativeSettings;
 import com.hypixel.hytale.server.core.modules.entity.player.PlayerSettings;
 import com.hypixel.hytale.server.core.modules.entity.player.PlayerSkinComponent;
@@ -168,6 +171,8 @@ public class NPCController {
         "LAYA_HUD_JSON", "config/laya-hud.json");
     private static final double IDENTIFY_MAX_DIST = 6.4;   // 16 ray steps x 0.4 blocks
     private static final double SCAN_RADIUS = 16.0;        // mine/gather search radius (near the player)
+    private static final double FREE_SCAN_RADIUS = 48.0;   // free mode: search around Laya
+    private static final double FREE_ROAM_DISTANCE = 24.0; // free mode: walk this far for fresh ground
 
     // --- Idle banter: real area report (POST /idle_scene) ---
     private static final double NEARBY_RADIUS = 24.0;      // entity scan sphere around the player
@@ -191,7 +196,7 @@ public class NPCController {
 
     // --- Task 4/5 (farming): the planned patch and the executor ---
     /** Sanity bound on rows, not a feature limit: "plant all 100 seeds" needs 20 rows. */
-    private static final int FARM_MAX_ROWS = 80;
+    private static final int FARM_MAX_ROWS = 5;
     /** +/- columns either side of the facing axis (5 wide). */
     private static final int FARM_GRID_HALF_WIDTH = 2;
     /** Start two rows out so the patch is never under the player's feet. */
@@ -332,14 +337,12 @@ public class NPCController {
     private boolean thinking = false;
     private boolean talking = false;
     private long nextFaceClearMs = 0;
-    private String savedNameplate = null;
     // Task 3 (name): the player-facing name; persisted to NAME_JSON, restored at spawn.
     // volatile: written on the bridge HTTP thread (set_name) and read on the world thread.
     private volatile String companionName = "Laya";
     // Task 3 (hud): the player's choice, persisted to HUD_JSON and restored in start().
     // volatile: written on the world thread (/laya hud) and read on the join thread.
     private volatile boolean hudEnabled = true;
-    private float savedHeadPitch = Float.NaN;
     Ref<EntityStore> layaRef;
     NPCEntity npcEntity;
 
@@ -426,6 +429,16 @@ public class NPCController {
     private int farmTilled = 0;
     private int farmPlanted = 0;
     private int farmSkipped = 0;
+    // Free farm (0.4.3): out of seeds means keep tilling 5x5 plots until stopped.
+    private boolean farmOutOfSeeds = false;
+    private long nextFarmPatchMs = 0;
+    private boolean levelFired = false;
+    private long levelNextMs = 0;
+    private int levelHits = 0;
+    // Last plot geometry, so free farm can leave a 2-block gap to the next 5x5.
+    private int farmPlotX, farmPlotY, farmPlotZ;
+    private int farmPlotDirX = 0, farmPlotDirZ = 1;
+    private boolean farmPlotSet = false;
     private double farmLastDist = Double.MAX_VALUE;
     private int farmUnsticks = 0;
 
@@ -505,6 +518,14 @@ public class NPCController {
     // the current task. taskHint is the hint word reused for the between-block
     // rescan. Set from the bridge thread at task start, read on the world thread.
     private volatile int taskTargetCount = 1;
+    // Free mode: keep working until "stop" instead of finishing when the area is
+    // empty; rescan around Laya and roam to new ground.
+    private volatile boolean taskContinuous = false;
+    private volatile int taskQualityMin = 0;   // 0 = any; 2 = Uncommon and above
+    private long nextFreeScanMs = 0;
+    private int freeRoamTick = 0;
+    private boolean mapMarkerRegistered = false;
+    private boolean mapProviderLogged = false;
     private volatile int taskDoneCount = 0;
     private volatile String taskHint = "";
 
@@ -517,6 +538,8 @@ public class NPCController {
     private static final long THINKING_SHOW_AFTER_MS = 1000L;
     /** Minimum time the dots stay up once shown, so a near-threshold reply is visible. */
     private static final long THINKING_MIN_SHOW_MS = 1200L;
+    /** Player-model thinking emote (Cosmetics EmotesInGame); dots still work without it. */
+    private static final String THINKING_EMOTE = "PonderDismissive";
 
     // Stance state. NOTE: the scheduler tick itself is never gated by these —
     // a "stay" must stop WRITING the follow point, never kill the loop
@@ -1179,17 +1202,64 @@ public class NPCController {
         thinkingNextDotMs = now + 400;
         thinkingDots = (thinkingDots % 3) + 1;
         try {
-            Nameplate plate = worldStore.getComponent(layaRef, Nameplate.getComponentType());
-            if (plate != null) {
-                plate.setText(getCompanionName() + " " + ".".repeat(thinkingDots));
-            }
+            DisplayNameSupport.setDisplayName(
+                layaRef, ".".repeat(thinkingDots), worldStore);
         } catch (Throwable ignored) {
         }
     }
 
+    /** One-time per world: a map marker that reads her live position and name. */
+    private void registerMapMarker() {
+        try {
+            if (world == null || layaRef == null) return;
+            world.getWorldMapManager().addMarkerProvider("laya_companion",
+                (w, player, collector) -> {
+                    try {
+                        if (layaRef == null || worldStore == null) return;
+                        TransformComponent t = worldStore.getComponent(
+                            layaRef, TransformComponent.getComponentType());
+                        if (t == null || t.getPosition() == null) return;
+                        MapMarker marker = new MapMarkerBuilder(
+                            "laya_companion", "UserA.png",
+                            new Transform(new Vector3d(t.getPosition())))
+                            .withCustomName(getCompanionName())
+                            .build();
+                        // addIgnoreViewDistance: her marker must show even when the map
+                        // view distance does not cover her position yet.
+                        collector.addIgnoreViewDistance(marker);
+                        if (!mapProviderLogged) {
+                            mapProviderLogged = true;
+                            plugin.log("Map: provider update ran");
+                        }
+                    } catch (Throwable ignored) {
+                    }
+                });
+            mapMarkerRegistered = true;
+            plugin.log("Map: companion marker registered");
+        } catch (Throwable t) {
+            plugin.log("Map marker registration failed: " + t);
+        }
+    }
+
+    /** Free mode: drop the current target but keep the order alive; the tick rescans. */
+    private void enterFreeIdle(String reason) {
+        taskWorking.set(false);
+        taskAdjacent = false;
+        taskPhase = "IDLE";
+        phaseSinceMs = 0;
+        taskHitCount = 0;
+        pendingTaskTarget = null;
+        long nowMs = System.currentTimeMillis();
+        lastTaskWriteMs = nowMs;
+        nextFreeScanMs = nowMs + 1000;
+        plugin.log("Free mode: " + reason + " - picking another target");
+    }
+
     /** HUD icon state for the live task: mining / chopping / gathering, or null. */
     public String hudTask() {
-        if (taskKind == null || "IDLE".equals(taskPhase)) return null;
+        if (taskKind == null) return null;
+        // Free mode has no target between blocks, but the icon must stay up.
+        if ("IDLE".equals(taskPhase) && !taskContinuous) return null;
         // Task 6: the Farm icon shows while she is actually working, and drops back to
         // Follow the moment the task ends (phase IDLE/DONE).
         // Harvesting reuses the Farm icon on purpose: same activity to the player, and
@@ -1438,14 +1508,12 @@ public class NPCController {
         runOnWorld(() -> {
             try {
                 if (layaRef != null && worldStore != null) {
-                    Nameplate np = worldStore.getComponent(layaRef, Nameplate.getComponentType());
-                    if (np != null) np.setText(name);
+                    // No name tag over her head; the HUD and chat use the new name.
+                    DisplayNameSupport.setDisplayName(layaRef, null, worldStore);
                 }
             } catch (Throwable t) {
                 plugin.log("Nameplate rename failed: " + t);
             }
-            // A stale capture would restore the OLD name when thinking ends.
-            savedNameplate = null;
         });
         pokeHud();   // the 500 ms card frame picks the new name up on the next tick
     }
@@ -1875,11 +1943,12 @@ public class NPCController {
                         layaEntityId = "laya_npc_" + System.currentTimeMillis();
                         if (result.second() instanceof NPCEntity npc) {
                             npcEntity = npc;
-                            // Task 3: the engine named her from npc.laya.name; override.
+                            // Task 3: the engine named her from npc.laya.name. Clear it:
+                            // Jon does not want a name tag over her head (2026-10-28);
+                            // the HUD and chat carry the name. Thinking re-adds the
+                            // nameplate with dots only, then clears it again.
                             try {
-                                Nameplate np = worldStore.getComponent(
-                                    layaRef, Nameplate.getComponentType());
-                                if (np != null) np.setText(companionName);
+                                DisplayNameSupport.setDisplayName(layaRef, null, worldStore);
                             } catch (Throwable t) {
                                 plugin.log("Nameplate apply at spawn failed: " + t);
                             }
@@ -2314,10 +2383,16 @@ public class NPCController {
         taskDigCount = 0;
         taskRadius = 0;
         taskAreaSet = false;
+        taskContinuous = false;
+        taskQualityMin = 0;
+        nextFreeScanMs = 0;
         // Task 4/5: a cancelled farm task must not leave a queue behind, or the next
         // stop_task/follow would resume planting where it left off.
         farmQueue.clear();
         farmIndex = 0;
+        farmOutOfSeeds = false;
+        nextFarmPatchMs = 0;
+        farmPlotSet = false;
         farmStage = "TILL";
         farmFired = false;
         farmNextActMs = 0;
@@ -2422,7 +2497,13 @@ public class NPCController {
                                 double tx = Double.parseDouble(parts[0]);
                                 double ty = Double.parseDouble(parts[1]);
                                 double tz = Double.parseDouble(parts[2]);
-                                boolean ok = writeSlot(taskSlot, new Vector3d(tx, ty, tz));
+                                // A target below her feet means a hole she just dug:
+                                // aim the walk at feet level INSIDE that hole so she
+                                // steps down to the stone instead of swinging from the
+                                // edge (reported 2026-10-28).
+                                double slotY = ty < l.y - 0.5 ? ty + 1.0 : ty;
+                                boolean ok = writeSlot(taskSlot,
+                                    new Vector3d(tx + 0.5, slotY, tz + 0.5));
                                 if (ok) {
                                     refreshPath();
                                     lastTaskWriteMs = now;   // starts the 10-min abandonment timer
@@ -2534,6 +2615,10 @@ public class NPCController {
 
                         // Bridge "thinking" dots over her head while a slow turn runs.
                         tickThinking(now);
+
+                        // 0.4.3: put her on the map once per world. The provider reads
+                        // her live position and name, so the marker follows and renames.
+                        if (!mapMarkerRegistered) registerMapMarker();
 
                         // Diagnostic (fix cycle 2/3): one line per 5 s so the plugin log proves
                         // the settled stand-off and whether the head is actually offset from the
@@ -2733,6 +2818,28 @@ public class NPCController {
                                 farmTick(now, l);
                             }
                         } else if ("WALKING".equals(taskPhase)) {
+                            // Free mining below her feet: after a short walk, put her
+                            // INTO the hole she dug. Engine Seek will not path into a
+                            // 1-wide drop, so she circled the rim (2026-10-28).
+                            if (taskContinuous && taskSnapY < l.y - 0.5) {
+                                double hd = Math.hypot(
+                                    l.x - (taskSnapX + 0.5), l.z - (taskSnapZ + 0.5));
+                                if (hd <= 2.5 && now - phaseSinceMs > 1200) {
+                                    int fx = (int) Math.floor(taskSnapX + 0.5);
+                                    int fz = (int) Math.floor(taskSnapZ + 0.5);
+                                    int fy = taskSnapY + 1;
+                                    if (passableBlock(BlockBreaker.blockId(world, fx, fy, fz))
+                                        && passableBlock(BlockBreaker.blockId(world, fx, fy + 1, fz))) {
+                                        layaT.teleportPosition(
+                                            new Vector3d(fx + 0.5, fy, fz + 0.5));
+                                        refreshPath();
+                                        phaseSinceMs = now;
+                                        plugin.log("Free mine: stepped into the hole @"
+                                            + fx + "," + fy + "," + fz);
+                                        return;
+                                    }
+                                }
+                            }
                             if (isTaskAdjacent()) {
                                 boolean woodTask = AXE_HINTS.contains(
                                     taskHint == null ? "" : taskHint.toLowerCase());
@@ -2793,7 +2900,16 @@ public class NPCController {
                                     spotX = cx;
                                     spotZ = cz + Math.signum(oz) * 0.9;
                                 }
-                                Vector3d spot = new Vector3d(spotX, taskSnapY, spotZ);
+                                int spotY = taskSnapY + 1;   // feet ABOVE the block, never inside it
+                                int bxI = (int) Math.floor(spotX);
+                                int bzI = (int) Math.floor(spotZ);
+                                if (!passableBlock(BlockBreaker.blockId(world, bxI, spotY, bzI))
+                                    || !passableBlock(BlockBreaker.blockId(world, bxI, spotY + 1, bzI))) {
+                                    plugin.log("Task unstick skipped: the spot would be inside a block");
+                                    phaseSinceMs = now;
+                                    return;
+                                }
+                                Vector3d spot = new Vector3d(spotX, spotY, spotZ);
                                 layaT.teleportPosition(spot);
                                 refreshPath();
                                 plugin.log("Task unstick " + taskUnsticks + "/" + TASK_MAX_UNSTICKS
@@ -2802,9 +2918,11 @@ public class NPCController {
                                 phaseSinceMs = now;   // fresh window for the adjacency check
                             } else if (taskUnsticks >= TASK_MAX_UNSTICKS
                                 && now - phaseSinceMs > TASK_GIVE_UP_MS) {
-                                clearTask("task_failed: can't reach it");
+                                if (taskContinuous) enterFreeIdle("target unreachable");
+                                else clearTask("task_failed: can't reach it");
                             } else if (now - phaseSinceMs > TASK_REACH_TIMEOUT_MS) {
-                                clearTask("task_failed: can't reach it");
+                                if (taskContinuous) enterFreeIdle("target timed out");
+                                else clearTask("task_failed: can't reach it");
                             }
                         } else if ("SWINGING".equals(taskPhase)) {
                             // Cycle 11: the visible "couple of swings" before the fall.
@@ -2829,6 +2947,29 @@ public class NPCController {
                             }
                         } else if ("DONE".equals(taskPhase) && now - phaseSinceMs >= TASK_SETTLE_MS) {
                             finishTaskSuccess();
+                        }
+
+                        // Free mode (0.4.3): keep the order alive with no target.
+                        // Rescan around Laya; if the 48-block circle is empty, walk to
+                        // fresh ground. Only an explicit stop ends this.
+                        if (taskContinuous && taskKind != null && "IDLE".equals(taskPhase)
+                            && ("mine".equals(taskKind) || "gather".equals(taskKind))) {
+                            lastTaskWriteMs = now;
+                            if (now >= nextFreeScanMs) {
+                                nextFreeScanMs = now + 5000;
+                                // Hold the pickaxe while free mining even between
+                                // blocks; the WALKING path only equips when it has a
+                                // target, so in an empty stretch she kept the hoe
+                                // (reported 2026-10-28).
+                                if ("mine".equals(taskKind)) equipTaskTool();
+                                int r = scanTaskTarget(taskKind,
+                                    taskHint == null ? "" : taskHint);
+                                if (r == 1) {
+                                    plugin.log("Free mode: next target found - continuing");
+                                } else if (r == 0) {
+                                    roamForMore(l);
+                                }
+                            }
                         }
 
                         // Live intent: a real (non-sentinel) target farther than StopDistance+margin.
@@ -3181,23 +3322,24 @@ public class NPCController {
             if (layaRef == null || worldStore == null) return;
             if (on && !thinking) {
                 thinkingDots = 1;
-                Nameplate np = worldStore.getComponent(layaRef, Nameplate.getComponentType());
-                if (np != null) {
-                    savedNameplate = np.getText();
-                    np.setText(getCompanionName() + " .");
-                }
-                HeadRotation hr = worldStore.getComponent(layaRef, HeadRotation.getComponentType());
-                if (hr != null) {
-                    savedHeadPitch = hr.getRotation().pitch();
-                    hr.getRotation().setPitch((float) Math.toRadians(-25.0));
+                // Dots only: the name is blanked while she thinks, so the overhead
+                // text is nothing but the animation. setDisplayName is the engine's
+                // own NPC naming path (a direct Nameplate write never rendered).
+                DisplayNameSupport.setDisplayName(layaRef, ".", worldStore);
+                // Player-model thinking emote, same call the engine's /emote uses.
+                // If it is not available the dots still carry the state.
+                try {
+                    AnimationUtils.playAnimation(layaRef, AnimationSlot.Emote,
+                        null, THINKING_EMOTE, true, worldStore);
+                } catch (Throwable ignored) {
                 }
             } else if (!on && thinking) {
-                Nameplate np = worldStore.getComponent(layaRef, Nameplate.getComponentType());
-                if (np != null && savedNameplate != null) np.setText(savedNameplate);
-                HeadRotation hr = worldStore.getComponent(layaRef, HeadRotation.getComponentType());
-                if (hr != null && !Float.isNaN(savedHeadPitch)) hr.getRotation().setPitch(savedHeadPitch);
-                savedNameplate = null;
-                savedHeadPitch = Float.NaN;
+                DisplayNameSupport.setDisplayName(layaRef, null, worldStore);
+                try {
+                    AnimationUtils.stopAnimation(layaRef, AnimationSlot.Emote, worldStore);
+                } catch (Throwable ignored) {
+                }
+                plugin.log("Thinking: dots off");
             }
             thinking = on;
         } catch (Throwable t) {
@@ -3288,7 +3430,10 @@ public class NPCController {
         // here as the literal string "null" through extractJsonField).
         if (task != null && !task.isEmpty()
             && !"none".equalsIgnoreCase(task) && !"null".equalsIgnoreCase(task)) {
-            handleTask(task, targetHint, count, scope, radius);
+            boolean continuousTask = extractJsonBool(json, "continuous");
+            Integer qf = extractJsonInt(json, "quality_min");
+            int taskQualityFloor = qf == null ? 0 : Math.max(0, Math.min(5, qf));
+            handleTask(task, targetHint, count, scope, radius, continuousTask, taskQualityFloor);
         }
 
         // Whether THIS turn is itself starting a task. Her persona keeps
@@ -3298,7 +3443,13 @@ public class NPCController {
         boolean startingTask = task != null && !task.isEmpty()
             && !"none".equalsIgnoreCase(task) && !"null".equalsIgnoreCase(task);
 
-        if ("stop_task".equalsIgnoreCase(action)) {
+        if ("thinking_on".equalsIgnoreCase(action)) {
+            // Voice turns bypass ChatListener, so the bridge's voice helper sends
+            // these two actions around run_chat (2026-10-28).
+            setThinking(true);
+        } else if ("thinking_off".equalsIgnoreCase(action)) {
+            setThinking(false);
+        } else if ("stop_task".equalsIgnoreCase(action)) {
             // Player said "stop mining" / "that's enough" / "never mind": cancel the
             // task AND any live fight, but KEEP following (a stop-task is not a stay).
             combat.requestCancel();
@@ -3403,14 +3554,15 @@ public class NPCController {
      * The world-thread body logs and posts an event back to the ai-bridge.
      */
     private void handleTask(String task, String hint, int count) {
-        handleTask(task, hint, count, null, 0);
+        handleTask(task, hint, count, null, 0, false, 0);
     }
 
     private void handleTask(String task, String hint, int count, String scope) {
-        handleTask(task, hint, count, scope, 0);
+        handleTask(task, hint, count, scope, 0, false, 0);
     }
 
-    private void handleTask(String task, String hint, int count, String scope, int radius) {
+    private void handleTask(String task, String hint, int count, String scope, int radius,
+                              boolean continuousTask, int qualityFloor) {
         final String t = task.trim().toLowerCase();
         final String rawHint = hint == null ? "" : hint.trim().toLowerCase();
         // Cycle 5: "just get 1" carries no hint word; reuse the previous hint
@@ -3439,6 +3591,11 @@ public class NPCController {
         taskTargetCount = requested;
         taskDoneCount = 0;
         taskHint = h;
+        // Free mode + quality floor arrive as their own wire keys (0.4.3).
+        taskContinuous = continuousTask;
+        taskQualityMin = Math.max(0, Math.min(5, qualityFloor));
+        nextFreeScanMs = 0;
+        pendingMoveTo = null;   // a free-mode roam point must not survive a new order
         taskScope = "area".equalsIgnoreCase(scope) ? "area" : "tree";
         taskRadius = radius > 0 ? Math.min(radius, 50) : 0;
         taskAreaSet = false;     // a new area task anchors to its own first scan
@@ -3448,6 +3605,8 @@ public class NPCController {
         plugin.log("Task received: " + t + (h.isEmpty() ? "" : " hint=" + h)
             + " count=" + (requested == 0 ? "all" : String.valueOf(requested))
             + " scope=" + taskScope
+            + (taskContinuous ? " free" : "")
+            + (taskQualityMin > 0 ? " quality>=" + taskQualityMin : "")
             + (taskRadius > 0 ? " radius=" + taskRadius : ""));
         world.execute(() -> {
             try {
@@ -3515,7 +3674,8 @@ public class NPCController {
     private void handleStopTask() {
         if (world == null) return;
         world.execute(() -> {
-            boolean live = !"IDLE".equals(taskPhase) || pendingTaskTarget != null;
+            boolean live = !"IDLE".equals(taskPhase) || pendingTaskTarget != null
+                || taskContinuous;
             if (!live) {
                 plugin.log("stop_task: no task running");
                 return;
@@ -3523,7 +3683,12 @@ public class NPCController {
             int done = taskDoneCount;
             String label = taskSnapLabel != null ? taskSnapLabel
                 : (taskLabel != null ? taskLabel : "block");
+            if (taskContinuous) {
+                label = (taskHint == null || taskHint.isEmpty())
+                    ? "block" : hintLabel(taskHint);   // never the clearing block's name
+            }
             pendingTaskTarget = null;
+            pendingMoveTo = null;   // a free-mode roam point must not outlive the task
             resetTaskState("task_cancelled by player");
             plugin.log("Task cancelled by player (" + done + " " + label + " done)");
             postEvent("task_done", "stopped on request; " + done + " " + label + " finished");
@@ -3887,10 +4052,26 @@ public class NPCController {
     private void runScan(String task, String hint) {
         int r = scanTaskTarget(task, hint);
         if (r == -2) {
+            if (taskContinuous) {
+                enterFreeIdle("unreachable tree base");
+                return;
+            }
             postEvent("task_failed", "that trunk is on a ledge I can't reach from here");
         } else if (r < 0) {
             postEvent("task_failed", task + ": unknown target hint '" + hint + "'");
         } else if (r == 0) {
+            if (taskContinuous) {
+                // Free mode must not fail on an empty start: keep the order alive and
+                // let the tick roam forward looking for the next face.
+                taskKind = task;
+                taskHint = hint;
+                taskPhase = "IDLE";
+                phaseSinceMs = 0;
+                lastTaskWriteMs = System.currentTimeMillis();
+                nextFreeScanMs = System.currentTimeMillis() + 500;
+                plugin.log("Free mode: nothing at the start - roaming for " + hint);
+                return;
+            }
             logNearMiss(hint, taskRadius > 0 ? taskRadius : (int) SCAN_RADIUS);
             postEvent("task_failed", "no " + hintLabel(hint) + " within "
                 + (taskRadius > 0 ? taskRadius : (int) SCAN_RADIUS) + " blocks");
@@ -3935,6 +4116,168 @@ public class NPCController {
     }
 
     /**
+     * Continuous mining: the two-high face straight ahead. Checks feet and head level
+     * at 1..4 blocks out, nearest first, so she tunnels forward instead of digging the
+     * floor beneath her. Returns 1 with the target stashed, 0 when the corridor is clear.
+     */
+    private int scanForwardFace(Pattern pattern) {
+        try {
+            if (layaRef == null || worldStore == null) return 0;
+            TransformComponent lt = worldStore.getComponent(
+                layaRef, TransformComponent.getComponentType());
+            if (lt == null || lt.getPosition() == null) return 0;
+            Vector3d lp = lt.getPosition();
+            // Direction to work in: the block the PLAYER is aiming at first, then the
+            // player's facing. Laya's own yaw is often turned toward the player (idle
+            // face), which sent her digging sideways while a marble wall stood in front
+            // of Jon (2026-10-28).
+            double dirXf = 0, dirZf = 0;
+            try {
+                Ref<EntityStore> pref = playerRef == null ? null : playerRef.getReference();
+                Vector3i aimed = pref == null ? null
+                    : TargetUtil.getTargetBlock(pref, 16.0, worldStore);
+                if (aimed != null) {
+                    int aid = BlockBreaker.blockId(world, aimed.x, aimed.y, aimed.z);
+                    if (aid != BlockScanner.EMPTY_ID && matchesHint(pattern, aid)
+                        && blockMeetsQuality(aid, taskQualityMin)) {
+                        commitFreeMineTarget(aid, aimed.x, aimed.y, aimed.z, 0, 0);
+                        plugin.log("Free mine: aimed block @" + aimed.x + "," + aimed.y
+                            + "," + aimed.z);
+                        return 1;
+                    }
+                    dirXf = (aimed.x + 0.5) - lp.x;
+                    dirZf = (aimed.z + 0.5) - lp.z;
+                }
+                if (Math.abs(dirXf) < 0.5 && Math.abs(dirZf) < 0.5 && playerRef != null
+                    && playerRef.getTransform() != null
+                    && playerRef.getTransform().getRotation() != null) {
+                    Vector3d dir = playerRef.getTransform().getRotation()
+                        .transform(new Vector3d(0, 0, 1), new Vector3d());
+                    dirXf = dir.x;
+                    dirZf = dir.z;
+                }
+            } catch (Throwable ignored) {
+            }
+            if (Math.abs(dirXf) < 0.5 && Math.abs(dirZf) < 0.5) {
+                Vector3d fwd = lt.getRotation() == null
+                    ? new Vector3d(0, 0, 1)
+                    : lt.getRotation().transform(new Vector3d(0, 0, 1), new Vector3d());
+                dirXf = fwd.x;
+                dirZf = fwd.z;
+            }
+            int fxI = Math.abs(dirXf) >= Math.abs(dirZf) ? (int) Math.signum(dirXf) : 0;
+            int fzI = fxI == 0 ? (int) Math.signum(dirZf) : 0;
+            if (fxI == 0 && fzI == 0) fzI = 1;
+            final int fx = fxI;
+            final int fz = fzI;
+            int bx = (int) Math.floor(lp.x);
+            int by = (int) Math.floor(lp.y);
+            int bz = (int) Math.floor(lp.z);
+            int rightX = -fz, rightZ = fx;
+            for (int dist = 1; dist <= 3; dist++) {
+                for (int s = 0; s < 3; s++) {
+                    int off = s == 0 ? 0 : (s == 1 ? -1 : 1);
+                    for (int dy = 0; dy <= 1; dy++) {
+                        int x = bx + fx * dist + rightX * off;
+                        int y = by + dy;
+                        int z = bz + fz * dist + rightZ * off;
+                        int id = BlockBreaker.blockId(world, x, y, z);
+                        if (id == BlockScanner.EMPTY_ID) continue;
+                        if (!matchesHint(pattern, id)) continue;
+                        if (!blockMeetsQuality(id, taskQualityMin)) continue;
+                        commitFreeMineTarget(id, x, y, z, dist, off);
+                        return 1;
+                    }
+                }
+            }
+            // Before clearing anything, look for the REQUESTED block within 8 blocks
+            // (it is often just beside or below the aimed line). Clearing dirt first
+            // made marble orders dig grass while marble sat one block away (2026-10-28).
+            try {
+                BlockScanner.ScanResult near = BlockScanner.scanNearest(
+                    worldStore, new Vector3d(lp), 8.0,
+                    id -> matchesHint(pattern, id)
+                        && blockMeetsQuality(id, taskQualityMin),
+                    null, 6.0);
+                if (near != null && near.found()) {
+                    int above = BlockBreaker.blockId(world, near.x, near.y + 1, near.z);
+                    if (!passableBlock(above)) {
+                        // Buried stone/copper: clear the grass/dirt covering it first,
+                        // then the next scan can actually reach the ore (2026-10-28).
+                        commitFreeMineTarget(above, near.x, near.y + 1, near.z, 0, 0);
+                        plugin.log("Free mine: clearing cover @" + near.x + ","
+                            + (near.y + 1) + "," + near.z + " above the target");
+                    } else {
+                        commitFreeMineTarget(near.blockId, near.x, near.y, near.z, 0, 0);
+                        plugin.log("Free mine: nearby target @" + near.x + "," + near.y
+                            + "," + near.z);
+                    }
+                    return 1;
+                }
+            } catch (Throwable ignored) {
+            }
+            // Nothing matching nearby: keep the tunnel going. 1) clear the block
+            // at her own feet level ahead (dig through dirt/grass/stone and walk on),
+            // 2) step down ahead. This is how stone and copper under topsoil are
+            // reached once no matching block is close enough.
+            for (int dist = 1; dist <= 2; dist++) {
+                int x = bx + fx * dist;
+                int z = bz + fz * dist;
+                int id = BlockBreaker.blockId(world, x, by, z);
+                if (id == BlockScanner.EMPTY_ID) continue;
+                if (!solidTerrain(id)) continue;
+                if (!blockMeetsQuality(id, taskQualityMin)) continue;
+                if (!passableBlock(BlockBreaker.blockId(world, x, by + 1, z))) continue;
+                commitFreeMineTarget(id, x, by, z, dist, 0);
+                plugin.log("Free mine: clearing the way ahead @" + x + "," + by + "," + z);
+                return 1;
+            }
+            for (int dist = 1; dist <= 2; dist++) {
+                int x = bx + fx * dist;
+                int z = bz + fz * dist;
+                for (int dy = -1; dy >= -2; dy--) {
+                    int y = by + dy;
+                    int id = BlockBreaker.blockId(world, x, y, z);
+                    if (id == BlockScanner.EMPTY_ID) continue;
+                    if (!solidTerrain(id)) continue;
+                    if (!blockMeetsQuality(id, taskQualityMin)) continue;
+                    if (!passableBlock(BlockBreaker.blockId(world, x, y + 1, z))) continue;
+                    commitFreeMineTarget(id, x, y, z, dist, 0);
+                    plugin.log("Free mine: stair down to @" + x + "," + y + "," + z);
+                    return 1;
+                }
+            }
+        } catch (Throwable t) {
+            plugin.log("Free mine face scan failed: " + t);
+        }
+        return 0;
+    }
+
+    private void commitFreeMineTarget(int id, int x, int y, int z, int dist, int off) {
+        taskKind = "mine";
+        taskLabel = displayName(id);
+        taskBlockKey = BlockScanner.assetId(id);
+        taskBlockId = id;
+        pendingTaskTarget = x + "," + y + "," + z;
+        plugin.log("Free mine: target @" + x + "," + y + "," + z
+            + " (" + taskLabel + ") " + dist + " block(s) ahead"
+            + (off == 0 ? "" : " side=" + off));
+    }
+
+    /** True for a solid material (dirt, grass, stone, ore); plants and air are not. */
+    private boolean solidTerrain(int blockId) {
+        if (blockId == BlockScanner.EMPTY_ID) return false;
+        try {
+            BlockType bt = BlockType.getAssetMap() == null ? null
+                : BlockType.getAssetMap().getAsset(blockId);
+            return bt != null
+                && bt.getMaterial() == com.hypixel.hytale.protocol.BlockMaterial.Solid;
+        } catch (Throwable t) {
+            return true;
+        }
+    }
+
+    /**
      * World-thread scan + stash for the next block of a task. Returns
      * 1 = target stashed, 0 = nothing matching in range, -1 = unknown hint,
      * -2 = tree base out of vertical reach (cycle 13).
@@ -3947,6 +4290,12 @@ public class NPCController {
         if (pattern == null) {
             plugin.log("Scan " + hint + " checked=0 found=0 (unknown hint)");
             return -1;
+        }
+        if (taskContinuous && "mine".equals(task)) {
+            // Strip mining: only ever work the face straight ahead (feet, then head,
+            // then the next block out). No sphere scan, which used to pick the grass
+            // and stone BELOW her. Nothing ahead means the free branch roams forward.
+            return scanForwardFace(pattern);
         }
         Vector3d center;
         double radius = SCAN_RADIUS;
@@ -3980,6 +4329,16 @@ public class NPCController {
             }
         } else {
             center = new Vector3d(playerRef.getTransform().getPosition());
+            if (taskContinuous && layaRef != null) {
+                // Free mode belongs to Laya, not the player: rescan where SHE is so a
+                // roam step actually finds new ground (0.4.3).
+                TransformComponent lt = worldStore.getComponent(
+                    layaRef, TransformComponent.getComponentType());
+                if (lt != null && lt.getPosition() != null) {
+                    center = new Vector3d(lt.getPosition());
+                }
+                if (taskRadius <= 0) radius = FREE_SCAN_RADIUS;
+            }
         }
         // Cycle 10: wood is "this tree here" - nearest wins (a trunk beside the player
         // must beat a tree 10 blocks ahead in the view cone). Ore keeps the
@@ -3988,7 +4347,7 @@ public class NPCController {
             ? null : new Vector3d(playerRef.getTransform().getDirection());
         final Pattern scanPattern = pattern;
         BlockScanner.ScanResult result = BlockScanner.scanNearest(
-            worldStore, center, radius, id -> matchesHint(scanPattern, id), forward,
+            worldStore, center, radius, id -> matchesHint(scanPattern, id) && blockMeetsQuality(id, taskQualityMin), forward,
             isWood ? WOOD_SCAN_BAND : 8.0);
         int checked = result == null ? 0 : result.checked;
         int found = result == null ? 0 : result.found;
@@ -3998,7 +4357,7 @@ public class NPCController {
         // the default 16 gets one wider look at 32, the same rule the harvest sweep uses.
         if ((result == null || !result.found()) && area && !isWood && taskRadius == 0) {
             BlockScanner.ScanResult wide = BlockScanner.scanNearest(
-                worldStore, center, 32.0, id -> matchesHint(scanPattern, id), null, 8.0);
+                worldStore, center, 32.0, id -> matchesHint(scanPattern, id) && blockMeetsQuality(id, taskQualityMin), null, 8.0);
             if (wide != null && wide.found()) {
                 plugin.log("Scan " + hint + ": nothing within " + (int) SCAN_RADIUS
                     + " - widened to 32 and found " + wide.found);
@@ -4289,16 +4648,71 @@ public class NPCController {
      * generation). When nothing matching is left — or N is reached — post ONE
      * summary event: progress is reported per task, never per block.
      */
+    /**
+     * Free mode: walk about 24 blocks off in a rotating direction, then let the
+     * rescan run again. Uses the ordinary pendingMoveTo one-shot, so the engine
+     * still does the walking (no teleport).
+     */
+    private void roamForMore(Vector3d l) {
+        try {
+            double yaw = 0.0;
+            TransformComponent lt = worldStore.getComponent(
+                layaRef, TransformComponent.getComponentType());
+            if (lt != null && lt.getRotation() != null) yaw = lt.getRotation().yaw();
+            double angle = yaw;   // keep a straight line to new ground; no circling
+            double tx = l.x + Math.cos(angle) * FREE_ROAM_DISTANCE;
+            double tz = l.z + Math.sin(angle) * FREE_ROAM_DISTANCE;
+            pendingMoveTo = String.format(java.util.Locale.ROOT, "%.2f,%.2f", tx, tz);
+            nextFreeScanMs = System.currentTimeMillis() + 7000;
+            plugin.log("Free mode: nothing within " + (int) FREE_SCAN_RADIUS
+                + " - roaming to " + String.format(java.util.Locale.ROOT, "%.1f,%.1f", tx, tz));
+        } catch (Throwable t) {
+            plugin.log("Free mode roam failed: " + t);
+        }
+    }
+
     private void finishTaskSuccess() {
         // Cycle 11: a felled tree already dropped its real loot (role pickup), so
         // the manual single-block reward would double it.
         if (!taskFelled) grantBlockReward();
-        int done = ++taskDoneCount;
+        final String hint = taskHint == null ? "" : taskHint;
+        // Free mode counts only blocks that MATCH the request. Clearing grass/dirt on
+        // the way to marble is not "got marble" (reported 2026-10-28).
+        boolean isMatch = true;
+        if (taskContinuous) {
+            Pattern hp = HINT_PATTERNS.get(hint.toLowerCase(java.util.Locale.ROOT));
+            if (hp == null) hp = resolveHintPattern(hint);
+            isMatch = hp != null && taskBlockId != 0 && matchesHint(hp, taskBlockId);
+        }
+        int done = isMatch ? ++taskDoneCount : taskDoneCount;
         final String verb = taskSnapVerb == null ? "finished" : taskSnapVerb;
         final String label = taskSnapLabel == null ? "block" : taskSnapLabel;
+        final String wantLabel = taskContinuous
+            ? (hint.isEmpty() ? "block" : hintLabel(hint)) : label;
         final String key = taskSnapKey == null ? "?" : HarvestProbe.canonicalKey(taskSnapKey);
         final int requested = taskTargetCount;
-        final String hint = taskHint == null ? "" : taskHint;
+
+        // Free mode: do not finish, do not report progress as a completion. Drop
+        // back to IDLE with the task still live; the tick rescans around Laya.
+        if (taskContinuous) {
+            taskWorking.set(false);
+            taskAdjacent = false;
+            taskPhase = "IDLE";
+            phaseSinceMs = 0;
+            taskHitCount = 0;
+            taskTargetCount = 0;
+            taskRadius = (int) FREE_SCAN_RADIUS;
+            taskAreaSet = false;
+            taskAnchorSet = false;
+            followAnchor = null;
+            long nowMs = System.currentTimeMillis();
+            lastTaskWriteMs = nowMs;
+            nextFreeScanMs = nowMs + 1200;
+            plugin.log("Free mode: " + done + " " + wantLabel + " so far"
+                + (isMatch ? "" : " (cleared " + label + ")")
+                + " - rescanning for more " + hint);
+            return;
+        }
 
         boolean wantMore = requested == 0 || done < requested;
         if (wantMore && !hint.isEmpty()) {
@@ -4708,7 +5122,8 @@ public class NPCController {
         int seeds = seedCountFor(crop, kind);
 
         // 2. Ambiguous kind: both normal and eternal are reachable -> ask, do not guess.
-        if (kind.isEmpty()) {
+        // Free farm plants every kind she has (Jon, 2026-10-28): no question.
+        if (kind.isEmpty() && !taskContinuous) {
             int plain = seedCountFor(crop, "normal");
             int eternal = seedCountFor(crop, "eternal");
             if (plain > 0 && eternal > 0) {
@@ -4721,17 +5136,30 @@ public class NPCController {
             }
             kind = eternal > 0 ? "eternal" : (plain > 0 ? "normal" : "");
             seeds = seedCountFor(crop, kind);
+        } else if (kind.isEmpty()) {
+            plugin.log("Farm: free mode plants every seed kind in the pack");
         }
-        if (seeds == 0) {
+        if (seeds == 0 && !taskContinuous) {
             String what = (kind.isEmpty() ? "" : kind + " ")
                 + (crop.isEmpty() ? "seeds" : crop + " seeds");
             plugin.log("Farm: refused - no " + what + " in her pack or nearby chests");
             postEvent("task_failed", "I don't have any " + what);
             return;
         }
+        if (seeds == 0) {
+            plugin.log("Farm: free mode with no seeds left - tilling 5x5 plots until stop");
+        }
 
         // 2. Cells in front of the player: 5 wide, 5 rows out, capped by the seed count.
-        int want = wanted <= 0 ? seeds : Math.min(wanted, seeds);
+        // Free mode with no seeds still makes its 5x5 plot.
+        int want;
+        if (seeds == 0) {
+            want = 25;
+        } else if (wanted <= 0) {
+            want = seeds;
+        } else {
+            want = Math.min(wanted, seeds);
+        }
         want = Math.min(want, FARM_MAX_CELLS);   // backstop only, not the 5x5 of old
         java.util.List<int[]> cells = planFarmCells(pp, playerEntity, yaw, want);
         if (cells.isEmpty()) {
@@ -4764,6 +5192,8 @@ public class NPCController {
         farmSkipped = 0;
         farmSeedHint = crop;
         farmSeedKind = kind;
+        farmOutOfSeeds = seeds == 0;
+        nextFarmPatchMs = 0;
         farmNextActMs = 0;
         farmCellSinceMs = 0;
         farmLastWalkMs = 0;
@@ -4794,7 +5224,6 @@ public class NPCController {
      */
     private java.util.List<int[]> planFarmCells(Vector3d pp, Ref<EntityStore> playerEntity,
                                               float yaw, int want) {
-        java.util.List<int[]> cells = new java.util.ArrayList<>();
         int ax = (int) Math.floor(pp.x);
         int ay = (int) Math.floor(pp.y);
         int az = (int) Math.floor(pp.z);
@@ -4837,6 +5266,26 @@ public class NPCController {
         plugin.log("Farm: forward=(" + dirX + "," + dirZ + ") right=(" + rightX + "," + rightZ
             + ") from " + source + " (yaw=" + yaw + ", vec="
             + String.format(java.util.Locale.ROOT, "%.2f,%.2f", fx, fz) + ")");
+        java.util.List<int[]> cells = planFarmCellsAt(ax, ay, az, dirX, dirZ, want);
+        if (!cells.isEmpty()) {
+            farmPlotX = ax;
+            farmPlotY = ay;
+            farmPlotZ = az;
+            farmPlotDirX = dirX;
+            farmPlotDirZ = dirZ;
+            farmPlotSet = true;
+        }
+        return cells;
+    }
+
+    /**
+     * Five columns by five rows from an explicit anchor and forward axis. Shared by
+     * the first plot (player anchor) and the free-mode chain (last plot + gap).
+     */
+    private java.util.List<int[]> planFarmCellsAt(int ax, int ay, int az,
+                                                  int dirX, int dirZ, int want) {
+        java.util.List<int[]> cells = new java.util.ArrayList<>();
+        int rightX = -dirZ, rightZ = dirX;
         for (int row = 0; row < FARM_MAX_ROWS && cells.size() < want; row++) {
             int dist = FARM_FIRST_ROW + row;
             for (int col = -FARM_GRID_HALF_WIDTH; col <= FARM_GRID_HALF_WIDTH
@@ -4858,21 +5307,100 @@ public class NPCController {
         for (int y = baseY + 1; y >= baseY - 2; y--) {
             String key = FarmProbe.keyAt(world, x, y, z);
             if (!FarmProbe.isTillable(key) && !FarmProbe.TILLED_ID.equals(key)) continue;
-            if (BlockBreaker.blockId(world, x, y + 1, z) != BlockScanner.EMPTY_ID) continue;
+            if (!passableBlock(BlockBreaker.blockId(world, x, y + 1, z))) continue;
+            if (!flatAround(x, y, z)) continue;   // flat land only (0.4.3)
             return new int[]{x, y, z};
         }
         return null;
     }
 
+    /** True when the block above a soil cell leaves room for a crop (air or a plant). */
+    private boolean passableBlock(int blockId) {
+        if (blockId == BlockScanner.EMPTY_ID) return true;
+        try {
+            BlockType bt = BlockType.getAssetMap() == null ? null
+                : BlockType.getAssetMap().getAsset(blockId);
+            return bt == null
+                || bt.getMaterial() == com.hypixel.hytale.protocol.BlockMaterial.Empty;
+        } catch (Throwable t) {
+            return blockId == BlockScanner.EMPTY_ID;
+        }
+    }
+
+    /** True when the four horizontal neighbours are the same soil level. */
+    private boolean flatAround(int x, int y, int z) {
+        int[][] dirs = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
+        for (int[] d : dirs) {
+            int nx = x + d[0], nz = z + d[1];
+            String k = FarmProbe.keyAt(world, nx, y, nz);
+            if (!FarmProbe.isTillable(k) && !FarmProbe.TILLED_ID.equals(k)) return false;
+        }
+        return true;
+    }
+
     /** World-thread, once per follow tick while taskKind == "farm". */
     private void farmTick(long now, Vector3d l) {
-        if (farmQueue.isEmpty()) return;          // nothing planned: never report twice
+        if (farmQueue.isEmpty()) {
+            if (taskContinuous) {
+                lastTaskWriteMs = now;   // keep the free farm alive while replanning
+                if (now >= nextFarmPatchMs) planNextFreeFarmPlot();
+            }
+            return;          // nothing planned: never report twice
+        }
         if (farmIndex >= farmQueue.size()) {
             finishFarm();
             return;
         }
         int[] cell = farmQueue.get(farmIndex);
         int cx = cell[0], cy = cell[1], cz = cell[2];
+
+        // Free farm levels the plot: break the higher soil down to the plot base
+        // (the anchor's ground) before tilling, so the 5x5 is flat instead of stepped.
+        int baseY = farmPlotY - 1;
+        if (taskContinuous && cy > baseY) {
+            int id = BlockBreaker.blockId(world, cx, cy, cz);
+            if (id == BlockScanner.EMPTY_ID) {
+                cell[1] = cy - 1;
+                levelFired = false;
+                levelHits = 0;
+                farmNextActMs = now + 100;
+                return;
+            }
+            if (!levelFired) {
+                equipFarmItem("Tool_Pickaxe");
+                BlockBreaker.hitBlock(world, worldStore, layaRef, cx, cy, cz,
+                    BlockBreaker.MINE_INTERACTION);
+                levelFired = true;
+                levelHits = 0;
+                levelNextMs = now + 800;
+                plugin.log("Farm: leveling @" + cx + "," + cy + "," + cz
+                    + " down to y=" + baseY);
+                return;
+            }
+            if (now < levelNextMs) return;
+            if (BlockBreaker.blockId(world, cx, cy, cz) == BlockScanner.EMPTY_ID) {
+                cell[1] = cy - 1;
+                levelFired = false;
+                levelHits = 0;
+                farmNextActMs = now + 100;
+                return;
+            }
+            if (levelHits++ >= 5) {
+                farmSkipped++;
+                plugin.log("Farm: leveling failed @" + cx + "," + cy + "," + cz);
+                nextFarmCell(now);
+                return;
+            }
+            BlockBreaker.hitBlock(world, worldStore, layaRef, cx, cy, cz,
+                BlockBreaker.MINE_INTERACTION);
+            levelNextMs = now + 800;
+            return;
+        }
+        if (taskContinuous && cy < baseY) {
+            farmSkipped++;   // can't fill a dip; leave it
+            nextFarmCell(now);
+            return;
+        }
 
         // 1. Walk to the cell's column (same task slot the mine/gather path uses).
         double d = Math.hypot(l.x - (cx + 0.5), l.z - (cz + 0.5));
@@ -4975,6 +5503,13 @@ public class NPCController {
 
         // PLANT: raw write (S3) + consume one seed ourselves, then verify by read-back.
         String seed = equipFarmSeed(farmSeedHint, farmSeedKind);
+        if (seed == null && taskContinuous) {
+            // Free farm: no seeds left. The cell is already tilled, so keep the plot
+            // coming instead of calling it a failure.
+            farmOutOfSeeds = true;
+            nextFarmCell(now);
+            return;
+        }
         String cropBlock = FarmCrops.blockFor(seed);
         if (cropBlock == null) {
             farmSkipped++;
@@ -5009,6 +5544,8 @@ public class NPCController {
         taskDoneCount = farmPlanted;   // a stop mid-run must report what actually went in
         farmStage = "TILL";
         farmFired = false;
+        levelFired = false;
+        levelHits = 0;
         farmCellSinceMs = 0;
         farmLastWalkMs = 0;
         farmLastDist = Double.MAX_VALUE;
@@ -5030,6 +5567,21 @@ public class NPCController {
 
     /** Report verified counts through the normal event channel, then release the task. */
     private void finishFarm() {
+        if (taskContinuous) {
+            // Free farm: never finish; lay out the next 5x5 plot (tilling only once
+            // the seeds are gone) and keep going until an explicit stop.
+            farmQueue.clear();
+            farmIndex = 0;
+            farmStage = "TILL";
+            taskPhase = "WALKING";
+            taskTargetCount = 1;
+            long nowMs = System.currentTimeMillis();
+            lastTaskWriteMs = nowMs;
+            if (!planNextFreeFarmPlot()) {
+                nextFarmPatchMs = nowMs + 5000;
+            }
+            return;
+        }
         final int planted = farmPlanted;
         final int tilled = farmTilled;
         final int skipped = farmSkipped;
@@ -5049,6 +5601,81 @@ public class NPCController {
         if (skipped > 0) sb.append(", ").append(skipped).append(" skipped");
         plugin.log("Farm: done planted=" + planted + " tilled=" + tilled + " skipped=" + skipped);
         postEvent("task_done", sb.toString());
+    }
+
+    /**
+     * Free farm: lay out the next 5x5 plot in front of Laya. Tops seeds up from
+     * nearby chests; when none are left the plot is tilled anyway, per Jon's
+     * 2026-10-28 call. Returns false when there is no open ground or no hoe yet
+     * (the tick retries later without ending the order).
+     */
+    private boolean planNextFreeFarmPlot() {
+        try {
+            if (layaRef == null || worldStore == null) return false;
+            TransformComponent lt = worldStore.getComponent(
+                layaRef, TransformComponent.getComponentType());
+            if (lt == null || lt.getPosition() == null) return false;
+            Vector3d lp = new Vector3d(lt.getPosition());
+            float lyaw = lt.getRotation() == null ? 0f : lt.getRotation().yaw();
+
+            int seeds = seedCountFor(farmSeedHint, farmSeedKind);
+            if (seeds <= 0) {
+                int fetched = harvestSeedsFromChests(farmSeedHint, farmSeedKind, 25);
+                if (fetched > 0) {
+                    seeds = seedCountFor(farmSeedHint, farmSeedKind);
+                    plugin.log("Farm: free mode fetched " + fetched + " seed(s) from chests");
+                }
+            }
+            farmOutOfSeeds = seeds <= 0;
+            int want = farmOutOfSeeds ? 25 : Math.min(25, seeds);
+            java.util.List<int[]> cells;
+            if (farmPlotSet) {
+                // Chain the next 5x5 plot 7 blocks on (5 deep + 2 clear) along the same
+                // axis, so plots never merge into one long row.
+                int nx = farmPlotX + farmPlotDirX * 7;
+                int nz = farmPlotZ + farmPlotDirZ * 7;
+                cells = planFarmCellsAt(nx, farmPlotY, nz,
+                    farmPlotDirX, farmPlotDirZ, want);
+                if (cells.isEmpty()) {
+                    cells = planFarmCells(lp, layaRef, lyaw, want);
+                }
+            } else {
+                cells = planFarmCells(lp, layaRef, lyaw, want);
+            }
+            if (cells.isEmpty()) {
+                plugin.log("Farm: free mode - no open ground here for another plot");
+                nextFarmPatchMs = System.currentTimeMillis() + 5000;
+                return false;
+            }
+            if (bestHoe() == null) {
+                int borrowed = harvestHoeFromChests();
+                if (borrowed > 0) equipBestHoe();
+            }
+            if (bestHoe() == null) {
+                plugin.log("Farm: free mode - no hoe for the next plot");
+                nextFarmPatchMs = System.currentTimeMillis() + 5000;
+                return false;
+            }
+            farmQueue.clear();
+            farmQueue.addAll(cells);
+            farmIndex = 0;
+            farmStage = "TILL";
+            farmFired = false;
+            farmCellSinceMs = 0;
+            farmLastWalkMs = 0;
+            farmNextActMs = 0;
+            farmUnsticks = 0;
+            farmLastDist = Double.MAX_VALUE;
+            taskTargetCount = cells.size();
+            taskPhase = "WALKING";
+            lastTaskWriteMs = System.currentTimeMillis();
+            plugin.log("Farm: free mode - next plot " + cells.size() + " cell(s), "
+                + (farmOutOfSeeds ? "tilling only (no seeds)" : "seeds=" + seeds));
+            return true;
+        } catch (Throwable t) {
+            plugin.log("Farm: free mode next plot failed: " + t);
+            return false;
+        }
     }
 
     // --- Harvesting (2026-10-26): the executor -----------------------------------
@@ -5931,6 +6558,19 @@ public class NPCController {
     static Pattern resolveHintPattern(String hint) {
         ensureBlocksLoaded();
         String key = hint == null ? "" : hint.toLowerCase(java.util.Locale.ROOT).trim();
+        // Generic orders ("free roam mining", "mine this", "mine anything") target any
+        // block; the free-mode scan still prefers what the player aims at.
+        if (key.isEmpty() || key.equals("any") || key.equals("anything")
+            || key.equals("everything") || key.equals("whatever")
+            || key.equals("aimed") || key.equals("this") || key.equals("that")) {
+            Pattern any = HINT_PATTERNS.get("__any__");
+            if (any == null) {
+                any = Pattern.compile(".*");
+                HINT_PATTERNS.put("__any__", any);
+                HINT_LABELS.put("__any__", "block");
+            }
+            return any;
+        }
         if (key.isEmpty()) return null;
         Pattern known = HINT_PATTERNS.get(key);
         if (known != null) return known;
@@ -6010,6 +6650,39 @@ public class NPCController {
         // not what blocks.json lists (see HarvestProbe.canonicalKey).
         String canonical = HarvestProbe.canonicalKey(key);
         return !canonical.equals(key) && pattern.matcher(canonical).find();
+    }
+
+    /**
+     * Premium filter (0.4.3): does this block's own drop have quality {@code minQuality}
+     * or better? 0 means any. Quality ids live in Server/Item/Qualities (Uncommon = 2).
+     *
+     * <p>The drop is resolved the same way the engine chooses it: breaking > harvest >
+     * soft, then the block's own item. Blocks that name only a drop LIST cannot be
+     * judged before the break, so they pass rather than vanish.</p>
+     */
+    private static boolean blockMeetsQuality(int blockId, int minQuality) {
+        if (minQuality <= 0) return true;
+        try {
+            BlockType bt = BlockType.getAssetMap() == null ? null
+                : BlockType.getAssetMap().getAsset(blockId);
+            if (bt == null) return true;
+            String itemId = null;
+            BlockGathering g = bt.getGathering();
+            if (g != null) {
+                if (g.getBreaking() != null) itemId = nonEmpty(g.getBreaking().getItemId());
+                if (itemId == null && g.getHarvest() != null) {
+                    itemId = nonEmpty(g.getHarvest().getItemId());
+                }
+                if (itemId == null && g.getSoft() != null) itemId = nonEmpty(g.getSoft().getItemId());
+            }
+            if (itemId == null && bt.getItem() != null) itemId = nonEmpty(bt.getItem().getId());
+            if (itemId == null) return true;
+            Item item = Item.getAssetMap() == null ? null : Item.getAssetMap().getAsset(itemId);
+            if (item == null) return true;
+            return item.getQualityIndex() >= minQuality;
+        } catch (Throwable t) {
+            return true;
+        }
     }
 
     /** Display name from blocks.json (single name source), falling back to the asset key. */

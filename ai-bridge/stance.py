@@ -115,11 +115,22 @@ _TASK_REMARKS = {
                    "Wood's handled. Try to keep up."],
     },
     "mine": {
-        "soft": ["Good seam.", "Ore's in the bag.", "Rock didn't argue.",
-                 "Pick's still in one piece.", "That'll forge something."],
-        "strong": ["Good fucking seam.", "Ore's in the bag.",
-                   "Rock didn't argue. Smart rock.", "Pick's still in one piece.",
+        "soft": ["Rock didn't argue.", "Pick's still in one piece.",
+                 "That'll forge something."],
+        "strong": ["Rock didn't argue. Smart rock.", "Pick's still in one piece.",
                    "That'll forge something worth swinging."],
+    },
+    "stone": {
+        "soft": ["Solid work.", "That's a proper rock pile.", "Stone doesn't argue.",
+                 "Good clean stone.", "That'll build something."],
+        "strong": ["Good fucking rocks.", "Stone doesn't argue.",
+                   "That's a proper pile of rock.", "Solid work, no complaints."],
+    },
+    "ore": {
+        "soft": ["Ore's in the bag.", "Good seam.", "That'll smelt nicely.",
+                 "Worth the dig."],
+        "strong": ["Ore's in the bag.", "Good fucking seam.",
+                   "That'll smelt nicely.", "Worth the fucking dig."],
     },
     "gather": {
         "soft": ["Basket's fuller.", "That's the easy part.", "Worth the walk.",
@@ -158,6 +169,12 @@ def task_done_line(verb: str, got: int, item: str, total=None, personality: str 
     inventory file could not be read). ``reason`` is ``no_more`` or ``stopped``.
     """
     strong = (personality or "").strip().lower() in _STRONG_PERSONALITIES
+    if kind == "mine":
+        it = (item or "").lower()
+        if re.search(r"ore|copper|iron|gold|coal|crystal|gem|silver|tin", it):
+            kind = "ore"
+        elif re.search(r"stone|rock|rubble|marble|brick|granite|slate|basalt", it):
+            kind = "stone"
     head = f"{verb} {got} {item}"
     if total is not None and total > 0:
         head += f" - {total} {total_label}"
@@ -167,8 +184,7 @@ def task_done_line(verb: str, got: int, item: str, total=None, personality: str 
             head += f" That's all the {resource} nearby."
         else:
             head += " " + _NO_MORE_LINES.get(kind, "That's everything nearby.")
-    elif reason == "stopped":
-        head += " Stopped there."
+    # reason == "stopped": the verb already says it, just add the remark.
     pool = _TASK_REMARKS.get(kind, _TASK_REMARKS["gather"])
     remark = _pick(f"task-{kind}", pool["strong" if strong else "soft"])
     return head + " " + remark
@@ -186,6 +202,11 @@ def _named_target(message: str) -> str:
         if re.search(rf"\b{re.escape(word)}\b", text):
             return "wolf" if word == "wolves" else word
     return ""
+
+
+def named_target(message: str) -> str:
+    """Public wrapper: the creature the player named ("kill that squirell" -> squirrel)."""
+    return _named_target(message)
 
 
 def _friendly_role(role) -> str:
@@ -280,6 +301,9 @@ def stance_intent(message: str) -> Optional[str]:
     and must not read as a stay there.
     """
     text = (message or "").lower()
+    # "keep mining until I say stop" is a free-mode order, not a stay command.
+    text = re.sub(r"\b(?:until|till)\b.*$", " ", text)
+    text = re.sub(r"\buntil i say otherwise\b", " ", text)
     best_pos = -1
     best = None
     for pattern, intent in [(p, "stay") for p in STAY_PATTERNS] + \
