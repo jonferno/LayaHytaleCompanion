@@ -31,7 +31,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel
 
-from stance import stance_intent, stance_ack, STANCE_ACKS
+from stance import stance_intent, stance_ack, STANCE_ACKS, task_done_line
 from gearcheck import asks_about_gear
 from farming import (detect_farm, farm_ack, seed_kind, is_kind_answer,
                      count_from_message, detect_harvest, wants_no_replant,
@@ -55,7 +55,7 @@ SKIN_FIELDS = (
     "skinFeature", "gloves", "cape",
 )
 
-app = FastAPI(title="Laya AI Bridge", version="0.4.0-hybrid")
+app = FastAPI(title="Laya AI Bridge", version="0.4.2")
 
 
 @app.middleware("http")
@@ -674,7 +674,8 @@ def _looks_like_question(message: str) -> bool:
 
 
 def apply_stance_guard(message: str, action: str, say_line: str,
-                       fast: bool = False) -> tuple[str, str]:
+                       fast: bool = False, state=None,
+                       personality: str = "default") -> tuple[str, str]:
     """Apply a deterministic stance without discarding a real conversational reply.
 
     Short commands are already handled by fast_command() and keep their canned
@@ -697,7 +698,7 @@ def apply_stance_guard(message: str, action: str, say_line: str,
         return action, say_line
     action = stance
     if not (say_line or "").strip():
-        say_line = stance_ack(stance, message)
+        say_line = stance_ack(stance, message, state, personality)
     return action, say_line
 
 
@@ -936,6 +937,15 @@ def _verify_stream_text(sentences: list[str], raw: str) -> None:
         f"say_line_chars {len(norm(say_line))} match {match}")
 
 
+# A correct but slow provider must not slow every turn. Measured 2026-10-28:
+# NanoGPT from this PC had a 14 s median for a 20-token reply (7 of 10 calls over
+# 10 s) while its website felt fine, so the bridge demotes a provider that takes
+# >= 6 s for a couple of minutes and parks one that fails for one minute.
+SLOW_PROVIDER_MS = 6000.0
+SLOW_PROVIDER_COOLDOWN_MS = 120_000
+PROVIDER_FAIL_COOLDOWN_MS = 60_000
+
+
 class CloudLLMHandler:
     """Calls NanoGPT (uncensored primary), Groq, z.ai, or Google as fallbacks."""
 
@@ -1005,9 +1015,11 @@ class CloudLLMHandler:
         for provider in self.providers:
             name = provider["name"]
             if now < self.cooldowns.get(name, 0):
-                log(f"  {name} skipping (cooling down until {self.cooldowns[name]})")
+                left = max(0.0, (self.cooldowns[name] - now) / 1000.0)
+                log(f"  {name} skipping (cooling down {left:.0f}s more)")
                 continue
 
+            call_started = time.time()
             try:
                 log(f"  trying {name}...")
                 if name == "nano":
@@ -1023,17 +1035,29 @@ class CloudLLMHandler:
                     continue
 
                 if result:
-                    self.cooldowns[name] = 0
-                    log(f"  {name} -> SUCCESS")
+                    elapsed_ms = (time.time() - call_started) * 1000.0
+                    if elapsed_ms >= SLOW_PROVIDER_MS:
+                        # A correct but slow provider should not make every turn slow:
+                        # let a faster one carry the next few minutes.
+                        self.cooldowns[name] = max(self.cooldowns.get(name, 0),
+                                                   now + SLOW_PROVIDER_COOLDOWN_MS)
+                        log(f"  {name} -> SUCCESS in {elapsed_ms / 1000.0:.1f}s "
+                            f"(slow; other providers take over for "
+                            f"{SLOW_PROVIDER_COOLDOWN_MS // 1000}s)")
+                    else:
+                        self.cooldowns[name] = 0
+                        log(f"  {name} -> SUCCESS in {elapsed_ms / 1000.0:.1f}s")
                     return result
                 # Keep a longer cooldown if the provider set one itself (z.ai
                 # sets 1 h when the account is unfunded).
-                self.cooldowns[name] = max(self.cooldowns.get(name, 0), now + 10000)
-                log(f"  {name} -> failed, cooldown 10s")
+                self.cooldowns[name] = max(self.cooldowns.get(name, 0),
+                                           now + PROVIDER_FAIL_COOLDOWN_MS)
+                log(f"  {name} -> failed, cooldown {PROVIDER_FAIL_COOLDOWN_MS // 1000}s")
 
             except Exception as e:
                 log(f"  {name} exception: {e}")
-                self.cooldowns[name] = max(self.cooldowns.get(name, 0), now + 10000)
+                self.cooldowns[name] = max(self.cooldowns.get(name, 0),
+                                           now + PROVIDER_FAIL_COOLDOWN_MS)
 
         return "(Laya's thoughts are scattered - all LLM providers failed.)"
 
@@ -1065,7 +1089,7 @@ class CloudLLMHandler:
                         "max_tokens": CFG["llm_max_tokens"],
                         "stop": ["\nUser:", "\nPlayer:", "\n\n"],
                     },
-                    timeout=httpx.Timeout(20.0, connect=5.0),
+                    timeout=httpx.Timeout(10.0, connect=5.0),
                 )
                 if resp.status_code == 200:
                     content = (resp.json().get("choices", [{}])[0]
@@ -1834,6 +1858,33 @@ WOOD_SPECIES = {
     "mahogany", "teak", "walnut", "cherry", "crimson", "frost", "jade",
 }
 
+_WOOD_NOUNS = ("tree", "trees", "log", "logs", "timber", "trunk", "trunks")
+
+
+def normalize_wood_task(task: str, hint: str, message: str):
+    """A wood order is gather + wood, whatever the model called it.
+
+    Measured 2026-10-28: the same "chop this tree" arrived twice as
+    task=gather hint=wood (felling, axe icon) and once as task=mine hint=tree
+    (single block mined, pickaxe icon on the HUD). The verbs and nouns decide here,
+    deterministically.
+    """
+    if task not in ("mine", "gather"):
+        return task, hint
+    h = (hint or "").strip().lower()
+    text = (message or "").lower()
+    if h in _WOOD_NOUNS:
+        h = "wood"
+    wood_verb = re.search(r"\b(chop|chopping|fell|felling)\b", text)
+    wood_noun = re.search(r"\b(trees?|wood|logs?|timber|trunks?)\b", text)
+    cutting = re.search(r"\b(cut|cutting)\b", text)
+    cut_wood = cutting and wood_noun
+    species_cut = cutting and h in WOOD_SPECIES
+    if h == "wood" or (h in WOOD_SPECIES and (wood_verb or wood_noun)) or wood_verb \
+            or cut_wood or species_cut:
+        return "gather", "wood"
+    return task, hint
+
 
 def detect_task(message: str):
     """Force a task from an *imperative* verb + a named resource.
@@ -2088,7 +2139,93 @@ def wants_stop_task(message: str) -> bool:
     return any(cue in text for cue in STOP_TASK_CUES)
 
 
-def grounded_event_line(event: str, detail: str) -> str:
+def _inventory_total(key_part: str, exclude: str = "", only: str = "") -> Optional[int]:
+    """Count carried items whose id contains ``key_part`` (case-insensitive).
+
+    Used by the post-task line: "Got 2 Aspen Log - 41 in the pack now" reads the
+    plugin-synced inventory file. Returns None when the pack cannot be read, so
+    the caller can leave the total out instead of inventing one.
+    """
+    part = (key_part or "").lower()
+    if not part:
+        return None
+    try:
+        with open(INVENTORY_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except FileNotFoundError:
+        return None
+    except Exception as e:
+        log(f"Inventory total read failed: {e}")
+        return None
+    total = 0
+    found = False
+    for section in _INVENTORY_SECTIONS:
+        for it in data.get(section) or []:
+            iid = str(it.get("id") or "").lower()
+            if not iid or part not in iid:
+                continue
+            if exclude and exclude.lower() in iid:
+                continue
+            if only and only.lower() not in iid:
+                continue
+            total += int(it.get("qty", 1) or 0)
+            found = True
+    return total if found else 0
+
+
+def _inventory_total_any(candidates) -> Optional[int]:
+    """First candidate that finds carried items; None when none match at all."""
+    for cand in candidates:
+        if not cand:
+            continue
+        n = _inventory_total(cand)
+        if n:
+            return n
+    return None
+
+
+def _key_candidates(key: str):
+    """Block key -> possible carried-item prefixes.
+
+    The task detail reports the BLOCK key, which is not always the item id:
+    ``Wood_Birch_Trunk_Full`` drops ``Wood_Birch_Trunk``, and crop stage blocks
+    look like ``*Plant_Crop_Wheat_Block_State_Definitions_StageFinal``.
+    """
+    key = (key or "").strip()
+    cands = [key]
+    clean = key.lstrip("*")
+    clean = re.sub(r"_Block_State_Definitions.*$", "", clean, flags=re.IGNORECASE)
+    if clean.endswith("_Full"):
+        clean = clean[:-5]
+    cands.append(clean)
+    parts = clean.split("_")
+    if len(parts) > 2 and parts[0].lower() == "wood":
+        cands.append("_".join(parts[:2]))
+    seen = []
+    for c in cands:
+        if c and c not in seen:
+            seen.append(c)
+    return seen
+
+
+def _pretty_task_item(item: str) -> str:
+    """Turn a raw block key into a spoken item name.
+
+    Crop orders report the stage block, e.g.
+    ``*Plant_Crop_Wheat_Block_State_Definitions_StageFinal``. Keep a normal label
+    (``Aspen Log``) untouched; only clean a label that is clearly a key.
+    """
+    text = (item or "").strip()
+    if not text or ("_" not in text and "*" not in text):
+        return text
+    text = text.lstrip("*")
+    text = re.sub(r"_Block_State_Definitions.*$", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"^Plant_Crop_", "", text, flags=re.IGNORECASE)
+    words = [w for w in re.split(r"[_\s]+", text) if w]
+    return " ".join(words).title() if words else item
+
+
+def grounded_event_line(event: str, detail: str, personality: str = "default") -> str:
     """Turn a plugin observation into a short, truthful Laya line.
 
     Event reactions used to call the cloud model with only the event name and
@@ -2099,20 +2236,50 @@ def grounded_event_line(event: str, detail: str) -> str:
     event = (event or "").strip().lower()
     detail = (detail or "").strip().rstrip(".")
     if event == "task_done":
-        m = re.search(r"(?:gathered|mined|chopped)\s+(\d+)\s+(.+?)\s+\(([^)]+)\)",
+        low = detail.lower()
+        # Mine / gather / wood: "gathered 2 Aspen Log (Wood_Aspen_Trunk); ...".
+        # The line reports the pack total for that key plus a personality remark.
+        m = re.search(r"(gathered|mined|chopped)\s+(\d+)\s+(.+?)\s+\(([^)]+)\)",
                       detail, re.IGNORECASE)
         if m:
-            qty, item, _key = m.group(1), m.group(2).strip(), m.group(3)
-            if "no more" in detail.lower():
+            verb_raw, qty, item, key = (m.group(1).lower(), m.group(2),
+                                        m.group(3).strip(), m.group(4).strip())
+            kind = "wood" if key.lower().startswith("wood_") else (
+                "mine" if verb_raw == "mined" else "gather")
+            total = _inventory_total_any(_key_candidates(key))
+            item = _pretty_task_item(item)
+            reason = ""
+            resource = ""
+            if "no more" in low:
+                reason = "no_more"
                 resource = detail.split("no more", 1)[1].strip()
                 resource = re.sub(r"\s+within\s+.*$", "", resource, flags=re.I)
-                return f"Got {qty} {item} - that's all the {resource} nearby."
-            if "requested count" in detail.lower():
-                return f"Got {qty} {item} - that's the count you asked for."
-            if "stopped on request" in detail.lower():
-                return f"Stopped there - {qty} {item} finished."
-            return f"Got {qty} {item}."
-        if "stopped on request" in detail.lower():
+            elif "requested count" in low:
+                reason = ""
+            elif "stopped on request" in low:
+                reason = "stopped"
+            return task_done_line("Got", int(qty), item, total, personality,
+                                  kind=kind, reason=reason, resource=resource)
+        # Farming: "planted 3 normal carrot seeds, tilled 3 plots".
+        m = re.search(r"planted\s+(\d+)\s+(?:(normal|eternal)\s+)?([a-z]+)\s+seeds?",
+                      detail, re.IGNORECASE)
+        if m:
+            qty, kind_seed, crop = int(m.group(1)), (m.group(2) or "").lower(), m.group(3).lower()
+            exclude = "_eternal" if kind_seed == "normal" else ""
+            only = "_eternal" if kind_seed == "eternal" else ""
+            left = _inventory_total(f"plant_seeds_{crop}", exclude=exclude, only=only)
+            item = f"{crop} seed" + ("" if qty == 1 else "s")
+            return task_done_line("Planted", qty, item, left, personality,
+                                  kind="farm", total_label="seeds left")
+        # Harvest: "picked 4 carrots, 2 regrow, 3 replanted".
+        m = re.search(r"picked\s+(\d+)\s+([a-z]+)", detail, re.IGNORECASE)
+        if m:
+            qty, crop = int(m.group(1)), m.group(2).lower()
+            crop_word = crop.rstrip("s")
+            total = _inventory_total(f"plant_crop_{crop_word}") or _inventory_total(crop_word)
+            item = crop_word if qty == 1 else crop_word + "s"
+            return task_done_line("Picked", qty, item, total, personality, kind="harvest")
+        if "stopped on request" in low:
             return "Stopped there - task finished."
         return "Done with that - what next?"
     if event == "task_failed":
@@ -2164,7 +2331,7 @@ FAST_MAX_WORDS = 6
 FAST_STANCE_MAX_WORDS = 4
 
 
-def fast_command(message: str) -> Optional[tuple[str, str]]:
+def fast_command(message: str, state=None, personality: str = "default") -> Optional[tuple[str, str]]:
     """(action, say) for a pure deterministic command, else None.
 
     Shape rules (all must hold): lowercased + stripped, at most FAST_MAX_WORDS
@@ -2189,7 +2356,7 @@ def fast_command(message: str) -> Optional[tuple[str, str]]:
         return None
     stance = stance_intent(message)
     if stance:
-        return (stance, stance_ack(stance, message))
+        return (stance, stance_ack(stance, message, state, personality))
     return None
 
 
@@ -3029,7 +3196,7 @@ async def run_chat(player: str, message: str, state: dict, with_audio: bool,
         # capture nor the ~3 s LLM round-trip, both of which the guards below would
         # only overwrite. `fast` is None for everything else, so the normal path is
         # byte-identical for non-commands.
-        fast = fast_command(message)
+        fast = fast_command(message, state, CFG.get("personality", "default"))
         # Task 8 (vision): only user-originated turns may look at the player's screen
         # (typed chat via POST /chat + the voice loop), and only when the message
         # actually asks her to look ("look at this", "what's going on", ...). This
@@ -3250,10 +3417,8 @@ async def run_chat(player: str, message: str, state: dict, with_audio: bool,
                     task, target_hint = det_task, det_hint or ""
                 elif det_task and not target_hint:
                     target_hint = det_hint or ""
-        if (task in ("mine", "gather") and target_hint
-                and target_hint.lower() in WOOD_SPECIES
-                and re.search(r"\b(trees?|wood|logs?|chop|cut|fell)\b", (message or "").lower())):
-            target_hint = "wood"
+        if task in ("mine", "gather"):
+            task, target_hint = normalize_wood_task(task, target_hint, message)
         if task == "gather":
             # "gather everything you can find" -> the hint is filler, not a noun.
             # Mining keeps its own nouns: "mine everything" has no sensible block set.
@@ -3343,7 +3508,9 @@ async def run_chat(player: str, message: str, state: dict, with_audio: bool,
         # text decides, and the spoken line confirms it. A fast command already
         # holds the same deterministic result, so only non-fast messages re-derive.
         if not fast and action != "stop_task":
-            guarded_action, guarded_say = apply_stance_guard(message, action, say_line)
+            guarded_action, guarded_say = apply_stance_guard(
+                message, action, say_line, state=state,
+                personality=CFG.get("personality", "default"))
             if guarded_action != action:
                 log(f"Guard: stance cue -> action={guarded_action} (kept model line)")
             action, say_line = guarded_action, guarded_say
@@ -3725,7 +3892,13 @@ async def _react_to_event(event: str, detail: str):
     defaults to False for exactly this kind of caller).
     """
     try:
-        say = grounded_event_line(event, detail)
+        if event == "task_done":
+            # Give her a moment to pick the drops up: the completion event fires the
+            # instant the last block/tree falls, and the pack total in the line would
+            # otherwise miss exactly the items she just made (measured 2026-10-28).
+            await asyncio.sleep(1.5)
+        say = grounded_event_line(event, detail,
+                                  CFG.get("personality", DEFAULT_PERSONALITY))
         emotion = ""
         log(f"Event reaction (grounded): {say}")
         if not say:

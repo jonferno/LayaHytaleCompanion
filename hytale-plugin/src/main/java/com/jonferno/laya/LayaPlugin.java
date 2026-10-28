@@ -103,6 +103,7 @@ public class LayaPlugin extends JavaPlugin {
         bridge.start();
         npcController.start();
 
+        log("Config: " + com.jonferno.laya.npc.NPCController.configPathsSummary());
         log("Laya plugin loaded. Nervous system bridge pending.");
     }
 

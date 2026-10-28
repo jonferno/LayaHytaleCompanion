@@ -117,6 +117,7 @@ public class LayaDamageFilter extends DamageEventSystem {
                 if (controller.isDowned()) {
                     damage.setCancelled(true);
                     controller.reassertDownedPose();
+                    if (sourceRef != null) controller.suppressAggro(store, sourceRef);
                     LayaPlugin.log("Combat: downed hit ignored");
                     return;
                 }

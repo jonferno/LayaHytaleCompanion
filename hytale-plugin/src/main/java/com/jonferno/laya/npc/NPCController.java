@@ -50,7 +50,11 @@ import com.hypixel.hytale.server.core.universe.world.storage.ChunkStore;
 import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
 import com.hypixel.hytale.server.npc.NPCPlugin;
 import com.hypixel.hytale.server.npc.corecomponents.world.SensorReadPosition;
+import com.hypixel.hytale.server.npc.corecomponents.combat.ActionAttack;
+import com.hypixel.hytale.server.npc.corecomponents.entity.SensorTarget;
 import com.hypixel.hytale.server.npc.entities.NPCEntity;
+import com.hypixel.hytale.server.npc.instructions.Action;
+import com.hypixel.hytale.server.npc.instructions.ActionList;
 import com.hypixel.hytale.server.npc.instructions.Instruction;
 import com.hypixel.hytale.server.npc.instructions.Sensor;
 import com.hypixel.hytale.server.npc.role.support.MarkedEntitySupport;
@@ -346,6 +350,12 @@ public class NPCController {
     private Field instructionListField;
     private Field sensorSlotField;
     private Field sensorRangeField;   // R-T4-1: SensorReadPosition.range (double) — the slot discriminator
+    // Phase 1 (Forest Hue port): attack id -> compiled Target slot, filled at bind time.
+    private Field sensorTargetSlotField;   // SensorTarget.targetSlot (int)
+    private Field actionListField;         // Instruction.actions (ActionList)
+    private Field actionListActionsField;  // ActionList.actions (Action[])
+    private Field actionAttackField;       // ActionAttack.attack (String)
+    private final Map<String, Integer> attackChannels = new ConcurrentHashMap<>();
     private int followSlot = -1;
     private int taskSlot = -1;        // second position usage (mine/gather walking); -1 = unbound
     private int taskUnsticks = 0;     // cycle 10: watchdog placement used for this WALKING leg
@@ -503,6 +513,11 @@ public class NPCController {
     // cannot open + immediately toggle the page. Key = player name.
     private final Map<String, Long> lastInvOpenMs = new ConcurrentHashMap<>();
 
+    /** Delay before the thinking dots appear, so fast replies never flash them. */
+    private static final long THINKING_SHOW_AFTER_MS = 1000L;
+    /** Minimum time the dots stay up once shown, so a near-threshold reply is visible. */
+    private static final long THINKING_MIN_SHOW_MS = 1200L;
+
     // Stance state. NOTE: the scheduler tick itself is never gated by these —
     // a "stay" must stop WRITING the follow point, never kill the loop
     // (the pre-Phase-1 freeze bug came exactly from killing the loop).
@@ -510,6 +525,13 @@ public class NPCController {
     private volatile boolean staying = false;      // explicit "stay here" (watching, no walk)
     private volatile String pendingMoveTo = null;   // "x,z" one-shot consumed on the world thread
     private volatile boolean pendingStayClear = false;
+
+    // Bridge "thinking" indicator: dots on her nameplate when a turn runs past 1 s.
+    private volatile boolean thinkingRequested = false;
+    private long thinkingRequestedAt = 0;
+    private long thinkingShownAt = 0;
+    private long thinkingNextDotMs = 0;
+    private int thinkingDots = 1;
 
     // Cycle 12: the skin currently applied to her (read by the appearance page).
     private volatile PlayerSkin currentSkin = null;
@@ -1124,6 +1146,47 @@ public class NPCController {
         }
     }
 
+    /**
+     * Dots over her head while a bridge turn is still running after a second, plus the
+     * existing upward head tilt. One step every 400 ms (world thread, follow tick).
+     *
+     * <p>Once shown the dots stay for a minimum span, because a reply that lands 1.1 s
+     * after the request would otherwise leave them visible for a single frame and the
+     * player would never see them (in-game 2026-10-28: a 1.6 s turn showed nothing).</p>
+     */
+    private void tickThinking(long now) {
+        if (layaRef == null || worldStore == null) return;
+        if (combat.isDowned()) {
+            if (thinking) applyThinking(false);
+            thinkingRequested = false;
+            return;
+        }
+        if (thinkingRequested && !thinking) {
+            if (now - thinkingRequestedAt < THINKING_SHOW_AFTER_MS) return;
+            applyThinking(true);
+            thinkingShownAt = now;
+            thinkingNextDotMs = now + 400;
+            plugin.log("Thinking: dots on (" + (now - thinkingRequestedAt) + " ms turn)");
+            return;
+        }
+        if (!thinking) return;
+        if (!thinkingRequested && now - thinkingShownAt >= THINKING_MIN_SHOW_MS) {
+            applyThinking(false);
+            plugin.log("Thinking: dots off (" + (now - thinkingShownAt) + " ms shown)");
+            return;
+        }
+        if (now < thinkingNextDotMs) return;
+        thinkingNextDotMs = now + 400;
+        thinkingDots = (thinkingDots % 3) + 1;
+        try {
+            Nameplate plate = worldStore.getComponent(layaRef, Nameplate.getComponentType());
+            if (plate != null) {
+                plate.setText(getCompanionName() + " " + ".".repeat(thinkingDots));
+            }
+        } catch (Throwable ignored) {
+        }
+    }
+
     /** HUD icon state for the live task: mining / chopping / gathering, or null. */
     public String hudTask() {
         if (taskKind == null || "IDLE".equals(taskPhase)) return null;
@@ -1132,13 +1195,15 @@ public class NPCController {
         // Harvesting reuses the Farm icon on purpose: same activity to the player, and
         // no new art was asked for (2026-10-26).
         if ("farm".equals(taskKind) || "harvest".equals(taskKind)) return "farming";
-        if ("mine".equals(taskKind)) return "mining";
+        // Wood is checked before "mine": a woodcutting order can arrive as a mine task
+        // (hint "tree"), and the pickaxe icon was the visible symptom (2026-10-28).
         String label = taskLabel == null ? "" : taskLabel.toLowerCase();
         if (label.contains("wood") || label.contains("log") || label.contains("oak")
             || label.contains("birch") || label.contains("spruce")
             || label.contains("palm") || label.contains("tree")) {
             return "chopping";
         }
+        if ("mine".equals(taskKind)) return "mining";
         if (label.contains("stone") || label.contains("rubble")
             || label.contains("rock") || label.contains("ore")) {
             return "mining";
@@ -1507,6 +1572,15 @@ public class NPCController {
         } catch (Throwable t) {
             plugin.log("Laya: hud restore failed: " + t);
         }
+    }
+
+    /** One startup line naming the config files actually in use (path mix-ups are invisible otherwise). */
+    public static String configPathsSummary() {
+        return "blocks=" + BLOCKS_JSON
+            + " state=" + STATE_JSON
+            + " skin=" + Appearance.skinPath()
+            + " name=" + NAME_JSON
+            + " hud=" + HUD_JSON;
     }
 
     /**
@@ -1920,6 +1994,10 @@ public class NPCController {
             // follow binding — on any mismatch the task writes are disabled (taskSlot=-1)
             // and the follow slot keeps working.
             bindTaskSlot(usages, count);
+
+            // Phase 1 (Forest Hue port): attack id -> Target slot. Empty until the
+            // CombatTarget* instruction list lands; inert and harmless.
+            bindAttackChannels(root);
         } catch (Throwable t) {
             followSlot = -1;
             plugin.log("bindFollowSlot failed: " + t);
@@ -1936,10 +2014,88 @@ public class NPCController {
             sensorSlotField.setAccessible(true);
         }
         if (sensorRangeField == null) {
-            // R-T4-1: protected final double range — the compiled Range from the role JSON.
+            // R-T4-1: protected final double range - the compiled Range from the role JSON.
             sensorRangeField = SensorReadPosition.class.getDeclaredField("range");
             sensorRangeField.setAccessible(true);
         }
+        if (sensorTargetSlotField == null) {
+            sensorTargetSlotField = SensorTarget.class.getDeclaredField("targetSlot");
+            sensorTargetSlotField.setAccessible(true);
+        }
+        if (actionListField == null) {
+            actionListField = Instruction.class.getDeclaredField("actions");
+            actionListField.setAccessible(true);
+        }
+        if (actionListActionsField == null) {
+            actionListActionsField = ActionList.class.getDeclaredField("actions");
+            actionListActionsField.setAccessible(true);
+        }
+        if (actionAttackField == null) {
+            actionAttackField = ActionAttack.class.getDeclaredField("attack");
+            actionAttackField.setAccessible(true);
+        }
+    }
+
+    /**
+     * Phase 1 (Forest Hue port): map every {@code Attack} action in the compiled role to
+     * the Target slot its sensor reads. The existing position binder can only separate
+     * slots by their compiled Range, and the combat channels all use the same range, so
+     * identity (attack interaction id) is the only reliable key.
+     */
+    private void bindAttackChannels(Instruction root) {
+        attackChannels.clear();
+        List<String> found = new ArrayList<>();
+        try {
+            collectAttackChannels(root, found);
+        } catch (Throwable t) {
+            plugin.log("bindAttackChannels failed: " + t);
+            return;
+        }
+        plugin.log("Combat channels: " + attackChannels.size() + " bound"
+            + (found.isEmpty() ? "" : " " + found));
+    }
+
+    private void collectAttackChannels(Instruction node, List<String> found) throws IllegalAccessException {
+        if (node == null) return;
+        Sensor sensor = node.getSensor();
+        if (sensor instanceof SensorTarget target) {
+            int slot = sensorTargetSlotField.getInt(target);
+            ActionList list = (ActionList) actionListField.get(node);
+            Action[] actions = list == null ? null : (Action[]) actionListActionsField.get(list);
+            if (actions != null && slot >= 0) {
+                for (Action action : actions) {
+                    if (!(action instanceof ActionAttack attack)) continue;
+                    String id = (String) actionAttackField.get(attack);
+                    if (id != null && !id.isEmpty()) {
+                        attackChannels.put(id, slot);
+                        found.add(id + "=" + slot);
+                    }
+                }
+            }
+        }
+        Instruction[] kids = (Instruction[]) instructionListField.get(node);
+        if (kids != null) {
+            for (Instruction kid : kids) {
+                collectAttackChannels(kid, found);
+            }
+        }
+    }
+
+    /** True when the compiled role declares this attack channel. */
+    boolean hasChannel(String attackId) {
+        return attackId != null && attackChannels.containsKey(attackId);
+    }
+
+    /** Put a target into one channel by attack interaction id (world thread). */
+    boolean writeChannel(String attackId, Vector3d point) {
+        Integer slot = attackId == null ? null : attackChannels.get(attackId);
+        return slot != null && writeSlot(slot, point);
+    }
+
+    /** Clear one channel; the engine then holds that slot's base state. */
+    boolean clearChannel(String attackId) {
+        Integer slot = attackId == null ? null : attackChannels.get(attackId);
+        return slot != null && writeSlot(slot, CLEARED_POSITION);
     }
 
     /**
@@ -2375,6 +2531,9 @@ public class NPCController {
                             facePlayerWhenIdle(p, l, dist,
                                 following ? FOLLOW_DISTANCE + 1.5 : 16.0);
                         }
+
+                        // Bridge "thinking" dots over her head while a slow turn runs.
+                        tickThinking(now);
 
                         // Diagnostic (fix cycle 2/3): one line per 5 s so the plugin log proves
                         // the settled stand-off and whether the head is actually offset from the
@@ -3007,10 +3166,13 @@ public class NPCController {
      */
     /** Chat request started/ended: show dots above her head and tilt her head up. */
     public void setThinking(boolean on) {
-        if (world == null) return;
-        try {
-            world.execute(() -> applyThinking(on));
-        } catch (Throwable ignored) {
+        thinkingRequested = on;
+        thinkingRequestedAt = on ? System.currentTimeMillis() : 0;
+        if (!on && world != null) {
+            try {
+                world.execute(() -> applyThinking(false));
+            } catch (Throwable ignored) {
+            }
         }
     }
 
@@ -3018,10 +3180,11 @@ public class NPCController {
         try {
             if (layaRef == null || worldStore == null) return;
             if (on && !thinking) {
+                thinkingDots = 1;
                 Nameplate np = worldStore.getComponent(layaRef, Nameplate.getComponentType());
                 if (np != null) {
                     savedNameplate = np.getText();
-                    np.setText(getCompanionName() + "  ...");
+                    np.setText(getCompanionName() + " .");
                 }
                 HeadRotation hr = worldStore.getComponent(layaRef, HeadRotation.getComponentType());
                 if (hr != null) {

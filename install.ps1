@@ -131,6 +131,8 @@ $envPairs = @{
     "LAYA_BLOCKS_JSON"  = (Join-Path $configDir "blocks.json")
     "LAYA_STATE_JSON"   = (Join-Path $configDir "laya-inventory.json")
     "LAYA_SKIN_JSON"    = (Join-Path $configDir "laya-skin.json")
+    "LAYA_NAME_JSON"    = (Join-Path $configDir "laya-name.json")
+    "LAYA_HUD_JSON"     = (Join-Path $configDir "laya-hud.json")
     "LAYA_COMBAT_JSON"  = (Join-Path $configDir "laya-combat.json")
     "LAYA_LOG"          = (Join-Path $logsDir "laya-plugin.log")
 }

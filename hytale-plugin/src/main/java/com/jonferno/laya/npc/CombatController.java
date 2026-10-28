@@ -1,8 +1,12 @@
 package com.jonferno.laya.npc;
 
 import com.hypixel.hytale.component.Ref;
+import com.hypixel.hytale.component.Store;
 import com.hypixel.hytale.server.core.entity.AnimationUtils;
 import com.hypixel.hytale.server.core.entity.nameplate.Nameplate;
+import com.hypixel.hytale.server.core.asset.type.attitude.Attitude;
+import com.hypixel.hytale.server.npc.role.support.MarkedEntitySupport;
+import com.hypixel.hytale.server.npc.role.support.WorldSupport;
 import com.hypixel.hytale.server.core.inventory.Inventory;
 import com.hypixel.hytale.server.core.inventory.ItemStack;
 import com.hypixel.hytale.server.core.inventory.container.ItemContainer;
@@ -114,6 +118,8 @@ class CombatController {
     private static final double DEFEND_LEASH = 8.0;
     /** Proactive hunt: one sphere scan this often (spec section 3). */
     private static final long SCAN_INTERVAL_MS = 500;
+    /** A named attack target is retried for this long before giving up honestly. */
+    private static final long ATTACK_HINT_WINDOW_MS = 5_000;
     /** Proactive hunt radius around the PLAYER (spec section 3). */
     private static final double HUNT_RADIUS = 20.0;
     /** Crosshair reach for an explicit "attack that ..." command (spec section 3). */
@@ -250,6 +256,8 @@ class CombatController {
     private long nextSwingMs = 0;
     /** Bridge-supplied target words for an explicit attack ("kill those pigs"). */
     private volatile String attackHint = null;
+    /** Retry deadline for a named target; 0 while none is pending. */
+    private volatile long attackHintUntilMs = 0;
     /** Bridge-thread request to draw the best carried weapon for attack/defend. */
     private volatile boolean drawWeaponPending = false;
 
@@ -358,6 +366,8 @@ class CombatController {
     private long lastUseMs = 0;
     /** Per-second HP-pin latch while downed. */
     private long lastHpPinMs = 0;
+    /** Refresh latch for the downed aggro suppression (attitude IGNORE). */
+    private long lastAggroSuppressMs = 0;
     /** Once-per-press latch for the out-of-range interact line. */
     private long lastOutOfRangeLogMs = 0;
     /** The persisted HP, so a save always round-trips the last known value. */
@@ -437,6 +447,7 @@ class CombatController {
     /** Target words from the player's attack command (any NPC role may match). */
     void setAttackHint(String hint) {
         attackHint = hint == null || hint.isBlank() ? null : hint.trim();
+        attackHintUntilMs = attackHint == null ? 0 : System.currentTimeMillis() + ATTACK_HINT_WINDOW_MS;
     }
 
     /** True while a combat target is engaged (drives the HUD state word). */
@@ -764,19 +775,31 @@ class CombatController {
             Ref<EntityStore> crosshair = crosshairTarget();
             // An explicit crosshair target allows ANY NPC, animals included (spec section 3).
             if (crosshair != null && isValidEntity(crosshair) && !isForbiddenTarget(crosshair)) {
+                attackHint = null;
+                attackHintUntilMs = 0;
                 acquire(now, crosshair, "crosshair", layaPos);
                 return;
             }
-            String hint = attackHint;
-            if (hint != null) {
-                Ref<EntityStore> byHint = nearestByHint(playerPos, hint, now);
+        }
+        // A named target is retried on every scan for a few seconds: the first scan can
+        // run before the animal is inside HUNT_RADIUS ("attack bear" missed it once and
+        // only found it on the next scan). Outside the window it gives up honestly.
+        String hint = attackHint;
+        if (hint != null) {
+            Ref<EntityStore> byHint = nearestByHint(playerPos, hint, now);
+            if (byHint != null) {
                 attackHint = null;
-                if (byHint != null) {
-                    acquire(now, byHint, "hint", layaPos);
-                    return;
-                }
-                LayaPlugin.log("Combat: no target matching \"" + hint + "\"");
+                attackHintUntilMs = 0;
+                acquire(now, byHint, "hint", layaPos);
+                return;
             }
+            if (now < attackHintUntilMs) {
+                nextScanMs = now + 500;
+                return;
+            }
+            attackHint = null;
+            attackHintUntilMs = 0;
+            LayaPlugin.log("Combat: no target matching \"" + hint + "\"");
             nextScanMs = 0;   // the explicit cue also forces the nearest scan now
         }
         if (now < nextScanMs) return;
@@ -846,6 +869,11 @@ class CombatController {
      * Nearest NPC whose role matches a meaningful word from the attack command. Unlike
      * the proactive hunt this allows protected passives (cows, pigs, ...) because the
      * player explicitly named the animal (spec section 3: explicit attacks allow any NPC).
+     *
+     * <p>Tokens are matched fuzzily, not only by substring: "attack that squirell" (one
+     * wrong letter) must still find role {@code Squirrel}, or the explicit request falls
+     * through to a hostile 20 blocks away. Short tokens stay exact so "bear" cannot match
+     * a boar.</p>
      */
     private Ref<EntityStore> nearestByHint(Vector3d playerPos, String hint, long now) {
         Ref<EntityStore> best = null;
@@ -864,7 +892,7 @@ class CombatController {
                 for (String raw : lowerHint.split("[^a-z0-9_]+")) {
                     if (raw.length() < 3 || isHintStopword(raw)) continue;
                     String singular = raw.endsWith("s") ? raw.substring(0, raw.length() - 1) : raw;
-                    if (roleLower.contains(raw) || roleLower.contains(singular)) {
+                    if (hintTokenMatches(roleLower, raw) || hintTokenMatches(roleLower, singular)) {
                         match = true;
                         break;
                     }
@@ -882,6 +910,46 @@ class CombatController {
             LayaPlugin.log("Combat: hint scan failed: " + t);
         }
         return best;
+    }
+
+    /**
+     * One spoken word against one role name: substring, then prefix, then a small edit
+     * distance. Fuzzy only from 6 characters up, so bear/boar stay distinct.
+     */
+    static boolean hintTokenMatches(String roleLower, String token) {
+        if (roleLower.contains(token)) return true;
+        for (String part : roleLower.split("[^a-z0-9]+")) {
+            if (part.length() < 3) continue;
+            if (part.startsWith(token) || token.startsWith(part)) return true;
+            int max = token.length() >= 8 ? 2 : (token.length() >= 6 ? 1 : 0);
+            if (max == 0) continue;
+            if (Math.abs(part.length() - token.length()) > max) continue;
+            if (levenshtein(part, token, max) <= max) return true;
+        }
+        return false;
+    }
+
+    /** Bounded edit distance (returns {@code max + 1} as soon as it cannot fit). */
+    static int levenshtein(String a, String b, int max) {
+        int n = a.length(), m = b.length();
+        if (Math.abs(n - m) > max) return max + 1;
+        int[] prev = new int[m + 1];
+        int[] cur = new int[m + 1];
+        for (int j = 0; j <= m; j++) prev[j] = j;
+        for (int i = 1; i <= n; i++) {
+            cur[0] = i;
+            int rowMin = cur[0];
+            for (int j = 1; j <= m; j++) {
+                int cost = a.charAt(i - 1) == b.charAt(j - 1) ? 0 : 1;
+                cur[j] = Math.min(Math.min(cur[j - 1] + 1, prev[j] + 1), prev[j - 1] + cost);
+                if (cur[j] < rowMin) rowMin = cur[j];
+            }
+            if (rowMin > max) return max + 1;
+            int[] t = prev;
+            prev = cur;
+            cur = t;
+        }
+        return prev[m];
     }
 
     private static boolean isHintStopword(String w) {
@@ -1933,9 +2001,15 @@ class CombatController {
         channelStartMs = 0;
         lastUseMs = 0;
         lastHpPinMs = 0;
+        lastAggroSuppressMs = 0;
         // Clear combat + task movement. cancelTaskForCombat logs its own line (acceptable
         // per ruling 1) and posts NO npc_event (spec: no extra events).
         clearTarget();
+        // A downed body must stop being a target: hostiles kept swinging at her corpse,
+        // which handed the player free kills. Drop the killer's attitude to IGNORE and
+        // clear the target slot now; downedTick keeps refreshing it.
+        suppressAggro(owner.worldStore, sourceRef);
+        suppressAggro(owner.worldStore, null);
         owner.cancelTaskForCombat();
         owner.clearPendingMoveTo();        // a queued move_to must not walk her while down
         owner.stopSwing();                 // clear the Action slot (spec section 6)
@@ -1945,6 +2019,76 @@ class CombatController {
         saveState();
         owner.pokeHud();                   // Task 3: downed shows immediately, not in 500 ms
         owner.sayToPlayer(downedWarning());
+    }
+
+    /**
+     * Make every nearby NPC ignore Laya while she is downed.
+     *
+     * <p>Two engine facts made the first attempt fail (in-game 2026-10-28): clearing the
+     * target slot alone does nothing, because the retaliation path in
+     * {@code Template_Intelligent} runs {@code OverrideAttitude Hostile Duration 60} as
+     * soon as Laya damages an NPC, so its sensors re-acquire her body every tick and it
+     * keeps swinging (the player farmed free kills). The fix is to replace that override
+     * with {@code IGNORE} for a few seconds, refreshed while she is down, which is the
+     * same mechanism the engine itself uses.</p>
+     *
+     * <p>World thread only. {@code only} restricts it to one NPC; {@code null} scans 40
+     * blocks around her.</p>
+     */
+    void suppressAggro(Store<EntityStore> store, Ref<EntityStore> only) {
+        try {
+            if (store == null || owner.layaRef == null) return;
+            if (only != null) {
+                suppressOne(store, only);
+                return;
+            }
+            TransformComponent t = store.getComponent(
+                owner.layaRef, TransformComponent.getComponentType());
+            if (t == null || t.getPosition() == null) return;
+            java.util.List<Ref<EntityStore>> near = TargetUtil.getAllEntitiesInSphere(
+                new Vector3d(t.getPosition()), 40.0, store);
+            if (near == null) return;
+            for (Ref<EntityStore> ref : near) {
+                if (ref == null || !ref.isValid()) continue;
+                if (ref.getIndex() == owner.layaRef.getIndex()
+                    && ref.getStore() == owner.layaRef.getStore()) {
+                    continue;
+                }
+                suppressOne(store, ref);
+            }
+        } catch (Throwable ignored) {
+        }
+    }
+
+    /** Ignore-override + target-slot clear for one NPC. */
+    private void suppressOne(Store<EntityStore> store, Ref<EntityStore> npcRef) {
+        try {
+            if (store.getComponent(npcRef, NPCEntity.getComponentType()) == null) return;
+            WorldSupport ws = WorldSupport.get(npcRef, store);
+            if (ws != null) {
+                ws.overrideAttitude(owner.layaRef, Attitude.IGNORE, 3.0);
+            }
+            releaseTargetOn(store, npcRef);
+        } catch (Throwable ignored) {
+        }
+    }
+
+    /** Clear one NPC's target slots that hold Laya. */
+    private void releaseTargetOn(Store<EntityStore> store, Ref<EntityStore> npcRef) {
+        try {
+            MarkedEntitySupport marked = MarkedEntitySupport.get(npcRef, store);
+            if (marked == null) return;
+            int slots = marked.getMarkedEntitySlotCount();
+            for (int i = 0; i < slots; i++) {
+                Ref<EntityStore> target = marked.getMarkedEntityRef(i);
+                if (target == null || owner.layaRef == null) continue;
+                if (target.getIndex() == owner.layaRef.getIndex()
+                    && target.getStore() == owner.layaRef.getStore()) {
+                    marked.clearMarkedEntity(i);
+                }
+            }
+        } catch (Throwable ignored) {
+        }
     }
 
     /**
@@ -1959,6 +2103,12 @@ class CombatController {
      *  - No movement, weapon or swing write ever happens here.
      */
     private void downedTick(long now) {
+        // (0) Keep hostile NPCs off her body: the retaliation override is Hostile for
+        // 60 s, so a one-shot clear is re-acquired next tick. Refreshed every 750 ms.
+        if (now - lastAggroSuppressMs >= 750L) {
+            lastAggroSuppressMs = now;
+            suppressAggro(owner.worldStore, null);
+        }
         // (1) HP pin, once per second (spec section 6: "pinned to 1 each second").
         if (now - lastHpPinMs >= 1000L) {
             lastHpPinMs = now;

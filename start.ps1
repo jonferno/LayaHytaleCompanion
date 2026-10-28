@@ -12,25 +12,32 @@ if (-not (Test-Path $configPath)) {
 }
 
 $layaDir = Join-Path $Root "ai-bridge\laya"
-$layaExe = Get-ChildItem $layaDir -Filter "*windows-amd64-vulkan.exe" -ErrorAction SilentlyContinue |
+$layaExe = Get-ChildItem $layaDir -Filter "laya-*-windows-amd64-*.exe" -ErrorAction SilentlyContinue |
     Sort-Object LastWriteTime -Descending |
     Select-Object -First 1
 $layaCheckpoint = Join-Path $layaDir "typed-decisions"
 if (-not $layaExe -or -not (Test-Path $layaCheckpoint)) {
-    throw "laya.cpp is required. Put the Vulkan executable and typed-decisions checkpoint in '$layaDir'."
+    throw "laya.cpp is required. Run install.bat, or put the engine and typed-decisions checkpoint in '$layaDir'."
 }
 
-# Keep the plugin and the bridge pointed at the same local files.
+# Keep the plugin and the bridge pointed at the same local files. The values are also
+# written to the user environment: the plugin reads them when Hytale starts, and a
+# clone launched after another folder's installer must not inherit that folder's skin,
+# name or inventory (measured 2026-10-27).
 $envPairs = @{
     "LAYA_BLOCKS_JSON" = (Join-Path $Root "config\blocks.json")
     "LAYA_STATE_JSON"  = (Join-Path $Root "config\laya-inventory.json")
     "LAYA_SKIN_JSON"   = (Join-Path $Root "config\laya-skin.json")
+    "LAYA_NAME_JSON"   = (Join-Path $Root "config\laya-name.json")
+    "LAYA_HUD_JSON"    = (Join-Path $Root "config\laya-hud.json")
     "LAYA_COMBAT_JSON" = (Join-Path $Root "config\laya-combat.json")
     "LAYA_LOG"         = (Join-Path $Root "logs\laya-plugin.log")
 }
 foreach ($pair in $envPairs.GetEnumerator()) {
     Set-Item -Path "Env:$($pair.Key)" -Value $pair.Value
+    & setx $pair.Key $pair.Value | Out-Null
 }
+Write-Host "Config folder: $Root\config"
 
 Write-Host "Starting Laya AI bridge..." -ForegroundColor Green
 Start-Process -FilePath $python.Source -ArgumentList @((Join-Path $Root "ai-bridge\main.py")) -WorkingDirectory $Root

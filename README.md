@@ -16,6 +16,24 @@
   <strong>Tested on Hytale 0.7.4.</strong>
 </p>
 
+## What's new in 0.4.2
+
+- **You can see her think.** On a reply that runs past a second, her nameplate
+  animates `.` `..` `...` with a small head tilt, so a slow answer never looks like
+  she ignored you.
+- **Downed bodies stop drawing aggro.** Enemies that were fighting her drop her the
+  moment she goes down and keep ignoring her body, so no more free kills on a corpse.
+- **Wood is wood.** "Chop this tree" always counts as a felling order and shows the
+  axe on the HUD, whatever wording reaches the model.
+- **She reports her haul.** After wood, mining, gathering, farming or harvesting she
+  says what she got, the total in her pack, and a short line in her current
+  personality, instead of the same sentence every time.
+- **Faster turns when a provider is slow.** A provider that answers in 6 seconds or
+  more is skipped for two minutes, so a fast one takes the next replies.
+- **Cleaner installs.** Each folder's launcher now points config at itself, so names,
+  HUD settings and saves no longer leak between installs. Attack acknowledgements
+  also know which creature you named.
+
 ## What's new in 0.4.1
 
 - **"Hold here" actually holds.** She no longer teleports to you once you walk past
@@ -321,11 +339,11 @@ Hytale world state, speech, actions
 - `config/blocks.json`: player words to Hytale block names.
 - `config/hytale-knowledge.json`: compact game-knowledge reference.
 - `config/laya-persona.txt`: Laya's persona and response contract.
-- `dist/LayaPlugin-0.4.1.jar`: convenience plugin build.
+- `dist/LayaPlugin-0.4.2.jar`: convenience plugin build.
 
 ## Build the plugin
 
-The repository ships `dist/LayaPlugin-0.4.1.jar`. It is built against the 0.7.x
+The repository ships `dist/LayaPlugin-0.4.2.jar`. It is built against the 0.7.x
 server API and is **tested on Hytale 0.7.4**. If Hytale changes its API again,
 rebuild from source:
 
