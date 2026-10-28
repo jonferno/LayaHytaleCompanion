@@ -397,8 +397,8 @@ Hytale modding community. See each upstream project for its license.
 ### 100% vibe coded
 
 This project was **100% vibe coded** with
-[DeepSeek V4.1](https://www.deepseek.com/) and
-[OpenCode](https://opencode.ai/). Huge thanks to both, they made building
+[DeepSeek V4.1 1017](https://www.deepseek.com/) and
+[OpenBot](https://github.com/nightly-labs/openbot). Huge thanks to both, they made building
 Laya an absolute joy.
 
 ### Inspiration
