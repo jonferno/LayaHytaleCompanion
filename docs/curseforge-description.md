@@ -46,15 +46,13 @@ words and she works out how to do it, then tells you what actually happened.
 1. **Get the companion app.** Download the latest release from
    [GitHub](https://github.com/jonferno/LayaHytaleCompanion/releases) and unzip it. The file
    on the Files tab here is the plugin; the companion app is what makes her think and speak.
-2. **Pick your GPU backend.** The installer asks once: Vulkan (NVIDIA, AMD or Intel),
-   or CUDA 13 / CUDA 12 on NVIDIA. It downloads the matching engine and the
-   `typed-decisions` checkpoint for you (about 800 MB), so there is nothing to fetch
-   by hand.
-3. **Run `install.bat`.** Point it at your Hytale folder (usually `D:\Games\Hytale`). It
-   installs the plugin, the Python dependencies, and a config with empty keys.
-4. **Start the bridge with `start.bat`.** Open <http://127.0.0.1:8788>, paste your API keys
+2. **Run `install.bat`.** Point it at your Hytale folder (usually `D:\Games\Hytale`). It asks
+   once for your GPU backend (Vulkan on NVIDIA, AMD or Intel; CUDA 13 or CUDA 12 on NVIDIA),
+   downloads the matching engine and the `typed-decisions` checkpoint (about 800 MB), then
+   installs the plugin, the Python dependencies and a config with empty keys.
+3. **Start the bridge with `start.bat`.** Open <http://127.0.0.1:8788>, paste your API keys
    (Groq and z.ai are free to start, Deepgram includes $200 of starter credits), and save.
-5. **Start Hytale.** Laya spawns beside you. Say **"follow me"** and you are done.
+4. **Start Hytale.** Laya spawns beside you. Say **"follow me"** and you are done.
 
 ## Requirements
 
