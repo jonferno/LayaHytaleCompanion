@@ -20,7 +20,7 @@
 
 - **She is on the map.** Her marker follows her across chunks, uses her current name, and
   disappears when she is not spawned. This was the one 0.4.3 feature that never worked.
-- **One menu for everything.** Right-click her for a single companion page: your pack, her
+- **One menu for everything.** Interact with her for a single companion page: your pack, her
   pack, an equipped panel with a dedicated weapon slot, a Stack & Sort button in the pack's
   last cell, and a bottom row of buttons for Follow, Stay, Attack, Defend, Ranged and Magic.
 - **Ranged and magic.** Bows, crossbows and guns fire visible arrows and bolts out to 25
