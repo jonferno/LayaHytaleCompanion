@@ -21,6 +21,8 @@ public class LayaCommand extends AbstractCommand {
         addSubCommand(new ResetMemoryCommand(controllerOrNull()));
         // Task 3: /laya hud on|off. Same late resolution as reset.
         addSubCommand(new HudCommand(controllerOrNull()));
+        // 0.4.4: /laya combat opens the mode panel.
+        addSubCommand(new CombatCommand(controllerOrNull()));
     }
 
     /** The live controller, or null when the plugin is not up yet (callers must handle null). */
@@ -44,7 +46,7 @@ public class LayaCommand extends AbstractCommand {
         }
         context.sendMessage(Message.raw(companionName + ": appearance editor -> http://127.0.0.1:8788/appearance"));
         context.sendMessage(Message.raw("Say \"stay here\" to hold her, \"follow me\" to bring her along."));
-        context.sendMessage(Message.raw("Commands: /laya hud on|off  |  /laya reset memory confirm"));
+        context.sendMessage(Message.raw("Commands: /laya hud on|off  |  /laya combat (companion menu)  |  /laya reset memory confirm"));
         return CompletableFuture.completedFuture(null);
     }
 }

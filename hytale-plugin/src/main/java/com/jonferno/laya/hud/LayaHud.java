@@ -41,6 +41,10 @@ public final class LayaHud extends CustomUIHud {
     private float maxHp = 100f;
     private String state = DEFAULT_STATE;
     private boolean downed = false;
+    /** 0.4.4: melee | ranged | magic, so "attacking" draws the right weapon icon. */
+    private String mode = "melee";
+    /** 0.4.4: staff mana fraction (0..1) for the blue bar under health. */
+    private float mana = 1f;
     // Task 3 (name): the companion name shown on the card. Set from the controller;
     // DEFAULT_NAME until then, so the card is never blank.
     private String name = DEFAULT_NAME;
@@ -52,6 +56,8 @@ public final class LayaHud extends CustomUIHud {
     private float lastMaxHp = 100f;
     private String lastState = null;
     private boolean lastDowned = false;
+    private String lastMode = null;
+    private float lastMana = -1f;
     private boolean sentOnce = false;
     private String lastRevive = null;
     private String lastGear = null;
@@ -70,6 +76,8 @@ public final class LayaHud extends CustomUIHud {
         lastMaxHp = maxHp;
         lastState = state;
         lastDowned = downed;
+        lastMode = mode;
+        lastMana = mana;
         lastName = name;
         sentOnce = true;
     }
@@ -149,14 +157,28 @@ public final class LayaHud extends CustomUIHud {
      * @param downed the downed override: empty bar and {@link #DOWNED_TEXT}
      */
     public void setValues(float hp, float maxHp, String state, boolean downed) {
+        setValues(hp, maxHp, state, downed, "melee", 1f);
+    }
+
+    /**
+     * 0.4.4: the same entry point with the combat mode and mana, so an engaged Laya
+     * draws a bow or staff on the card instead of the sword, and the blue bar under
+     * health tracks her staff mana.
+     */
+    public void setValues(float hp, float maxHp, String state, boolean downed, String mode,
+                          float mana) {
         float max = maxHp > 0f ? maxHp : 100f;
         float clamped = hp < 0f ? 0f : Math.min(hp, max);
         String word = state == null || state.isEmpty() ? DEFAULT_STATE : state;
+        String m = mode == null || mode.isEmpty() ? "melee" : mode.toLowerCase();
+        float man = Math.max(0f, Math.min(1f, mana));
 
         boolean changed = !sentOnce
             || downed != lastDowned
             || Math.abs(clamped - lastHp) > 0.01f
             || Math.abs(max - lastMaxHp) > 0.01f
+            || Math.abs(man - lastMana) > 0.01f
+            || !m.equals(lastMode)
             || (downed ? false : !word.equals(lastState));
         if (!changed) {
             return;
@@ -166,6 +188,8 @@ public final class LayaHud extends CustomUIHud {
         this.maxHp = max;
         this.state = word;
         this.downed = downed;
+        this.mode = m;
+        this.mana = man;
 
         UICommandBuilder b = new UICommandBuilder();
         applyCurrent(b);
@@ -176,6 +200,8 @@ public final class LayaHud extends CustomUIHud {
         lastMaxHp = max;
         lastState = word;
         lastDowned = downed;
+        lastMode = m;
+        lastMana = man;
         sentOnce = true;
     }
 
@@ -202,6 +228,8 @@ public final class LayaHud extends CustomUIHud {
         float fraction = shownMax > 0 ? (float) shownHp / shownMax : 0f;
         b.set("#Hp.Text", shownHp + " / " + shownMax);
         setBars(b, fraction);
+        b.set("#ManaFill.Value", Math.max(0f, Math.min(1f, mana)));
+        b.set("#Mana.Text", "MP " + Math.round(Math.max(0f, Math.min(1f, mana)) * 100f));
         setIcon(b, state);
     }
 
@@ -211,14 +239,29 @@ public final class LayaHud extends CustomUIHud {
 
     /** Icon/ring ids in the .ui. Exactly one is shown at a time via Value 1. */
     private static final String[] ICONS = {
-        "Follow", "Attack", "Defend", "Mine", "Chop", "Gather", "Farm", "Stay", "Downed"
+        "Follow", "Attack", "Defend", "Mine", "Chop", "Gather", "Farm", "Stay", "Downed",
+        "Ranged", "Magic"
     };
 
     /** State word -> icon. Downed is passed explicitly from the caller. */
     private static String iconFor(String state) {
+        return iconFor(state, "melee");
+    }
+
+    /**
+     * 0.4.4: an engaged Laya draws the weapon family she is fighting with. The state
+     * word stays "attacking"; the mode picks sword, bow or staff.
+     */
+    private static String iconFor(String state, String mode) {
         String s = state == null ? "" : state.toLowerCase();
+        if ("attacking".equals(s) || "attack".equals(s)) {
+            if ("ranged".equals(mode)) return "Ranged";
+            if ("magic".equals(mode)) return "Magic";
+            return "Attack";
+        }
+        if ("ranged".equals(s)) return "Ranged";
+        if ("magic".equals(s)) return "Magic";
         return switch (s) {
-            case "attacking", "attack" -> "Attack";
             case "defending", "defend" -> "Defend";
             case "mining", "mine" -> "Mine";
             case "chopping", "chop" -> "Chop";
@@ -231,7 +274,7 @@ public final class LayaHud extends CustomUIHud {
     }
 
     private void setIcon(UICommandBuilder b, String state) {
-        String active = iconFor(state);
+        String active = iconFor(state, mode);
         for (String name : ICONS) {
             float v = name.equals(active) ? 1f : 0f;
             b.set("#Icon" + name + ".Value", v);

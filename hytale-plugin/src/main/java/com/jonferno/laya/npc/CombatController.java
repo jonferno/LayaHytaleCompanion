@@ -13,6 +13,10 @@ import com.hypixel.hytale.server.core.inventory.container.ItemContainer;
 import com.hypixel.hytale.server.core.asset.type.item.config.Item;
 import com.hypixel.hytale.math.vector.Rotation3f;
 import com.hypixel.hytale.server.core.modules.entity.component.HeadRotation;
+import com.hypixel.hytale.server.core.modules.entity.component.ModelComponent;
+import com.hypixel.hytale.server.core.inventory.InventoryComponent;
+import com.hypixel.hytale.server.core.asset.type.model.config.Model;
+import com.hypixel.hytale.server.core.asset.type.itemanimation.config.ItemPlayerAnimations;
 import com.hypixel.hytale.server.core.modules.physics.util.PhysicsMath;
 import com.hypixel.hytale.server.core.modules.entity.component.TransformComponent;
 import com.hypixel.hytale.server.core.modules.entity.damage.Damage;
@@ -44,18 +48,18 @@ import java.nio.file.Paths;
  *    watchdog all stand down (the {@code motionLocked} gates in {@code startFollowTick});
  *  - the STAY ANCHOR: the spot "stay here" pinned her to, so a fight can hand movement
  *    back to the anchor on release, or leash to the player when that anchor is stale
- *    (player > 32 blocks away — spec section 9);
- *  - Task 4: WEAPONS AND OUTBOUND DAMAGE — the best carried melee weapon is ranked,
+ *    (player > 32 blocks away â€” spec section 9);
+ *  - Task 4: WEAPONS AND OUTBOUND DAMAGE â€” the best carried melee weapon is ranked,
  *    equipped (a swap that can neither duplicate nor destroy a stack), swung on a
  *    1100 ms cadence with the item's own animation, and applied through the engine's
  *    damage pipeline; {@link #hpOf(Ref)} is the single HP reader for Tasks 4-6.
- *  - Task 6: TARGET SELECTION — a reactive stamp from the damage filter (15 s memory,
+ *  - Task 6: TARGET SELECTION â€” a reactive stamp from the damage filter (15 s memory,
  *    stance-independent), a proactive hunt in the {@code attack} stance (crosshair
  *    first only right after an explicit cue, else the nearest hostile-keyword NPC
  *    within 20 blocks of the player, every 500 ms), leashes of 16 (auto-aggro) / 8
  *    ({@code defend}), a 30 s ignore set for unreachable roles, target-death handling,
  *    and the per-stance movement release. {@link #isDowned()} stays false until Task 7.
- *  - Task 7: the DOWNED STATE and REVIVE CHANNEL (spec section 6) — a lethal hit is
+ *  - Task 7: the DOWNED STATE and REVIVE CHANNEL (spec section 6) â€” a lethal hit is
  *    cancelled and replaced by {@link #enterDowned}, which pins HP to 1, clears target,
  *    task and Action slot, plays the Death pose and persists; nothing revives her until
  *    a completed 10 s pickup. The channel is a LITERAL HOLD (Cycle A probe: holding the
@@ -74,7 +78,7 @@ import java.nio.file.Paths;
  * the revive channel and combat persistence.
  *
  * Access: this class uses only the {@link NPCController} members the plan widens to
- * package-private for the combat tasks — the fields {@code layaRef}, {@code worldStore},
+ * package-private for the combat tasks â€” the fields {@code layaRef}, {@code worldStore},
  * {@code npcEntity}, {@code playerRef}, {@code plugin}, the methods
  * {@link NPCController#writeFollowSlot(Vector3d)}, {@link NPCController#refreshPath()},
  * {@link NPCController#stopSwing()} and {@link NPCController#cancelTaskForCombat()},
@@ -87,7 +91,7 @@ import java.nio.file.Paths;
  * only (called from {@link #tick(long, Vector3d, Vector3d, double)} and, from Task 6,
  * the engagement path), so their state is plain fields.
  */
-class CombatController {
+public class CombatController {
 
     /** A stay anchor farther than this from the player earns one log line, nothing more. */
     private static final double STAY_ANCHOR_RELEASE_DISTANCE = 32.0;
@@ -122,6 +126,32 @@ class CombatController {
     private static final long ATTACK_HINT_WINDOW_MS = 5_000;
     /** Proactive hunt radius around the PLAYER (spec section 3). */
     private static final double HUNT_RADIUS = 20.0;
+
+    /**
+     * 0.4.4: an explicitly named target is searched this far from the player.
+     * The 20-block hunt radius is right for "nearest hostile", but a rabbit the
+     * player can see across a field is often farther, and "kill the rabbit"
+     * answering "no target matching rabbit" while the rabbit is visible reads as
+     * broken. Runs once per cue, so the bigger scan costs nothing per tick.
+     */
+    private static final double NAMED_TARGET_RADIUS = 48.0;
+
+    // --- 0.4.4: combat modes, abilities, ranged and magic ---
+
+    /** Abilities are Java-driven here (the swing path already applies damage). */
+    private static final long ABILITY_COOLDOWN_MS = 4500;
+    /** Bow/crossbow cadence and reach (Forest Hue: 25 blocks, clamped 5-50). */
+    private static final long RANGED_SHOT_MS = 1800;
+    private static final double RANGED_RANGE = 25.0;
+    /** Closer than this she backs off to keep shooting (Forest Hue staff kite). */
+    private static final double RANGED_HOLD_MIN = 6.0;
+    /** Magic: staff reach, cadence, cost and regen (Forest Hue: 8-block kite, 25 cost). */
+    private static final long MAGIC_CAST_MS = 2400;
+    private static final double MAGIC_RANGE = 20.0;
+    private static final float MAGIC_DAMAGE = 5.0f;
+    private static final int MAGIC_COST = 25;
+    private static final float MAGIC_MAX = 100f;
+    private static final float MAGIC_REGEN_PER_S = 4f;
     /** Crosshair reach for an explicit "attack that ..." command (spec section 3). */
     private static final float CROSSHAIR_RANGE = 12f;
     /** No position progress for this long -> drop the target as unreachable. */
@@ -138,7 +168,7 @@ class CombatController {
     /**
      * Hostile role keywords (spec section 3's parenthetical, extended with Hytale's
      * own role names). Matching is a case-insensitive SUBSTRING on
-     * {@link NPCEntity#getRoleName()}. Written fresh for this plugin — the reference
+     * {@link NPCEntity#getRoleName()}. Written fresh for this plugin â€” the reference
      * pack's list is not copied (MODLOG "Do not").
      */
     private static final String[] HOSTILE_ROLE_KEYWORDS = {
@@ -326,6 +356,31 @@ class CombatController {
     /** "follow" | "stay" | "attack" | "defend". Bridge thread writes, world thread reads. */
     private volatile String stance = "follow";
 
+    /** 0.4.4: "melee" | "ranged" | "magic". UI/command thread writes, world thread reads. */
+    private volatile String combatMode = "melee";
+    /** Ability / shot / cast cooldowns (millis, world clock). */
+    private long nextAbilityMs = 0;
+    private long nextRangedShotMs = 0;
+    private long nextMagicCastMs = 0;
+    /** Staff mana: 100 at full, 25 per cast, 4/s regen. */
+    private float magic = MAGIC_MAX;
+    private long magicLastTickMs = 0;
+    /** Stay stance: the next swing after taking a hit is a guard counter. */
+    private boolean counterReady = false;
+    /** One "no <family> weapon in her pack" line per mode switch. */
+    private String noFamilyWeaponLogged = "";
+    /** True while she stands at shooting distance instead of walking into melee. */
+    private boolean holdingAtRange = false;
+    /** 0.4.4: the model's animation-set ids are logged once; the chosen shoot/cast id is cached. */
+    private boolean animIdsLogged = false;
+    private String rangedAnimId = null;
+    private String magicAnimId = null;
+    private String rangedAnimWeapon = null;
+    private String magicAnimWeapon = null;
+    private String itemAnimLoggedFor = null;
+    private long nextAmmoNoticeMs = 0;
+    private String lastShieldLogged = null;
+
     /**
      * The spot a "stay here" pinned her to. World-thread only. Written by
      * {@link #noteStayAnchor(Vector3d)} when the stay one-shot runs; consumed by the
@@ -378,8 +433,53 @@ class CombatController {
     }
 
     /** Current stance string ("follow" | "stay" | "attack" | "defend"). */
-    String getStance() {
+    public String getStance() {
         return stance;
+    }
+
+    /** 0.4.4: current combat mode ("melee" | "ranged" | "magic"). */
+    public String getCombatMode() {
+        return combatMode;
+    }
+
+    /**
+     * 0.4.4: switch the combat mode. Called from the combat page (world thread) and the
+     * command (command thread), so the field is volatile; the weapon swap is deferred to
+     * the tick through {@link #drawWeaponPending}. Unknown values are ignored.
+     */
+    public void setCombatMode(String value, String source) {
+        if (value == null) return;
+        String v = value.trim().toLowerCase();
+        if (!"melee".equals(v) && !"ranged".equals(v) && !"magic".equals(v)) return;
+        boolean changed = !v.equals(combatMode);
+        combatMode = v;
+        nextWeaponCheckMs = 0;
+        drawWeaponPending = true;
+        nextAbilityMs = 0;
+        nextRangedShotMs = 0;
+        nextMagicCastMs = 0;
+        holdingAtRange = false;
+        if (!v.equals(noFamilyWeaponLogged)) noFamilyWeaponLogged = "";
+        try {
+            owner.onCombatModeChanged(v);
+        } catch (Throwable ignored) {
+        }
+        LayaPlugin.log("Combat: mode=" + v + " (" + source + ")" + (changed ? "" : " unchanged"));
+    }
+
+    /** 0.4.4: staff mana, 0..100, for the page and logs. */
+    public float magicPercent() {
+        return Math.max(0f, Math.min(1f, magic / MAGIC_MAX));
+    }
+
+    /**
+     * 0.4.4: the family of the weapon actually in her hand ("melee" | "ranged" |
+     * "magic"), for the HUD icon. Falls back to melee so a bow-less ranged order that
+     * fell back to a sword does not draw a bow on the card.
+     */
+    public String heldWeaponFamily() {
+        String family = familyClassOf(currentWeaponId());
+        return family == null ? "melee" : family;
     }
 
     /**
@@ -468,7 +568,7 @@ class CombatController {
 
     /**
      * True while she is collapsed (spec section 4/9). Kept separate from
-     * {@link #ownsMovement()} so a downed Laya never walks — {@code startFollowTick}
+     * {@link #ownsMovement()} so a downed Laya never walks â€” {@code startFollowTick}
      * ORs the two into its {@code motionLocked} gate.
      *
      * Task 7: true for the WHOLE downed state (entry -> pickup), including while the
@@ -494,8 +594,10 @@ class CombatController {
      * @param distToPlayer  horizontal distance player -> Laya
      */
     void tick(long now, Vector3d playerPos, Vector3d layaPos, double distToPlayer) {
+        // 0.4.4: staff mana regenerates on the world clock, even while idle.
+        regenMagic(now);
         // Task 7 (spec section 6, ruling 2): while downed NOTHING else in this tick runs
-        // — no weapon re-check, no scan, no steering, no swing. The downed branch owns
+        // â€” no weapon re-check, no scan, no steering, no swing. The downed branch owns
         // the per-second HP pin, the literal-hold gap check and the channel completion.
         if (downed) {
             downedTick(now);
@@ -535,7 +637,7 @@ class CombatController {
         maybeTakeReactive(now, playerPos, layaPos);
 
         // (1b) A stance change away from attack abandons a proactively-chosen target
-        //      (a reactive one survives — auto-aggro is stance-independent).
+        //      (a reactive one survives â€” auto-aggro is stance-independent).
         if (stanceReleasePending) {
             stanceReleasePending = false;
             if (activeTarget != null && "nearest".equals(targetSource)) {
@@ -545,7 +647,7 @@ class CombatController {
         }
 
         // (2) Validate the live target: died -> down; out of leash -> drop; no progress
-        //     or a vertical gap -> drop as unreachable. A drop just clears the target —
+        //     or a vertical gap -> drop as unreachable. A drop just clears the target â€”
         //     step (5) then releases movement exactly like an idle tick would.
         if (activeTarget != null) {
             validateTarget(now, playerPos, layaPos);
@@ -645,7 +747,7 @@ class CombatController {
      * ({@code hpOf <= 0}), or a vanished entity (both logged as {@code target down}); no
      * position progress for {@link #NO_PROGRESS_MS}; a vertical gap beyond
      * {@link #MAX_VERTICAL_GAP} (the last two add the role to the 30 s ignore set, and
-     * log {@code target dropped (unreachable)}). Clearing is enough — {@link #tick}
+     * log {@code target dropped (unreachable)}). Clearing is enough â€” {@link #tick}
      * releases movement on the same tick.
      */
     private void validateTarget(long now, Vector3d playerPos, Vector3d layaPos) {
@@ -680,7 +782,7 @@ class CombatController {
         // The 16/8 leash is a REACTIVE rule only (auto-aggro / defend, spec section 3):
         // a proactive attack-stance target is governed by the 20-block hunt radius it
         // was chosen within and by the no-progress / vertical-gap drops below, NOT by
-        // the leash — applying it here dropped (and re-acquired) any 16-20 block target
+        // the leash â€” applying it here dropped (and re-acquired) any 16-20 block target
         // every tick, spamming the drop line.
         if ("reactive".equals(targetSource)) {
             double leash = "defend".equals(stance) ? DEFEND_LEASH : AUTO_AGGRO_LEASH;
@@ -787,6 +889,17 @@ class CombatController {
         String hint = attackHint;
         if (hint != null) {
             Ref<EntityStore> byHint = nearestByHint(playerPos, hint, now);
+            if (byHint == null) {
+                // 0.4.4: the crosshair is re-checked on every scan while the hint is
+                // live, not only on the first one. The player often looks at the
+                // animal a moment after speaking, and one failed crosshair read used
+                // to throw the aim away for the rest of the window.
+                Ref<EntityStore> crosshair = crosshairTarget();
+                if (crosshair != null && isValidEntity(crosshair) && !isForbiddenTarget(crosshair)
+                        && hintMatchesRole(roleOf(crosshair).toLowerCase(), hint.toLowerCase())) {
+                    byHint = crosshair;
+                }
+            }
             if (byHint != null) {
                 attackHint = null;
                 attackHintUntilMs = 0;
@@ -799,7 +912,15 @@ class CombatController {
             }
             attackHint = null;
             attackHintUntilMs = 0;
-            LayaPlugin.log("Combat: no target matching \"" + hint + "\"");
+            // 0.4.4: say it failed and log what IS around, so a role-name mismatch
+            // ("rabbit" vs whatever the animal's role is called) shows up in one run
+            // instead of another round of guessing.
+            LayaPlugin.log("Combat: no target matching \"" + hint + "\" within "
+                + (int) NAMED_TARGET_RADIUS + " blocks; nearby: " + nearbyRoles(playerPos));
+            try {
+                owner.sayToPlayer("I can't find a " + hint + " anywhere near here.");
+            } catch (Throwable ignored) {
+            }
             nextScanMs = 0;   // the explicit cue also forces the nearest scan now
         }
         if (now < nextScanMs) return;
@@ -881,23 +1002,13 @@ class CombatController {
         String lowerHint = hint.toLowerCase();
         try {
             java.util.List<Ref<EntityStore>> candidates = TargetUtil.getAllEntitiesInSphere(
-                playerPos, HUNT_RADIUS, owner.worldStore);
+                playerPos, NAMED_TARGET_RADIUS, owner.worldStore);
             if (candidates == null) return null;
             for (Ref<EntityStore> candidate : candidates) {
                 if (!isValidEntity(candidate) || isForbiddenTarget(candidate)) continue;
                 String role = roleOf(candidate);
                 if (role == null) continue;
-                String roleLower = role.toLowerCase();
-                boolean match = false;
-                for (String raw : lowerHint.split("[^a-z0-9_]+")) {
-                    if (raw.length() < 3 || isHintStopword(raw)) continue;
-                    String singular = raw.endsWith("s") ? raw.substring(0, raw.length() - 1) : raw;
-                    if (hintTokenMatches(roleLower, raw) || hintTokenMatches(roleLower, singular)) {
-                        match = true;
-                        break;
-                    }
-                }
-                if (!match) continue;
+                if (!hintMatchesRole(role.toLowerCase(), lowerHint)) continue;
                 Long until = ignoreUntilByRole.get(role);
                 if (until != null && now < until) continue;
                 double d = distanceXZ(playerPos, positionOf(candidate));
@@ -910,6 +1021,47 @@ class CombatController {
             LayaPlugin.log("Combat: hint scan failed: " + t);
         }
         return best;
+    }
+
+    /** One spoken word set against one role name (lowercase both). */
+    static boolean hintMatchesRole(String roleLower, String lowerHint) {
+        for (String raw : lowerHint.split("[^a-z0-9_]+")) {
+            if (raw.length() < 3 || isHintStopword(raw)) continue;
+            String singular = raw.endsWith("s") ? raw.substring(0, raw.length() - 1) : raw;
+            if (hintTokenMatches(roleLower, raw) || hintTokenMatches(roleLower, singular)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * 0.4.4 diagnostic: the NPC roles around the player, nearest first, with
+     * distances. Logged only when a named target was not found.
+     */
+    private String nearbyRoles(Vector3d playerPos) {
+        try {
+            java.util.List<Ref<EntityStore>> candidates = TargetUtil.getAllEntitiesInSphere(
+                playerPos, NAMED_TARGET_RADIUS, owner.worldStore);
+            if (candidates == null) return "none";
+            java.util.Map<String, Double> roles = new java.util.HashMap<>();
+            for (Ref<EntityStore> c : candidates) {
+                if (!isValidEntity(c) || isForbiddenTarget(c)) continue;
+                double d = distanceXZ(playerPos, positionOf(c));
+                if (d == Double.MAX_VALUE) continue;
+                String role = roleOf(c);
+                Double prev = roles.get(role);
+                if (prev == null || d < prev) roles.put(role, d);
+            }
+            if (roles.isEmpty()) return "none";
+            return roles.entrySet().stream()
+                .sorted(java.util.Map.Entry.comparingByValue())
+                .limit(5)
+                .map(e -> String.format("%s %.1f", e.getKey(), e.getValue()))
+                .collect(java.util.stream.Collectors.joining(", "));
+        } catch (Throwable t) {
+            return "scan failed: " + t;
+        }
     }
 
     /**
@@ -1055,23 +1207,310 @@ class CombatController {
      */
     private void steerAndSwing(long now, Vector3d layaPos) {
         Vector3d tp = positionOf(activeTarget);
+        boolean rangedMode = !"melee".equals(combatMode);
         if (tp != null) {
-            if (owner.writeFollowSlot(tp)) {
-                if (targetLastWrite == null || targetLastWrite.distance(tp) > TARGET_REPATH_MOVE) {
-                    targetLastWrite = new Vector3d(tp);
-                    owner.refreshPath();
+            double d = layaPos == null ? 0.0 : distanceXZ(layaPos, tp);
+            boolean hold = rangedMode && d >= RANGED_HOLD_MIN && d <= RANGED_RANGE;
+            if (hold) {
+                // 0.4.4: stand and shoot instead of walking into melee reach. Writing
+                // her own spot is what tells the engine Seek to stop.
+                if (!holdingAtRange && layaPos != null) owner.writeFollowSlot(layaPos);
+                holdingAtRange = true;
+                if (layaPos != null) {
+                    faceHead(layaPos, tp);
+                    faceBody(layaPos, tp);
+                }
+            } else {
+                holdingAtRange = false;
+                Vector3d walk = tp;
+                if (rangedMode && d < RANGED_HOLD_MIN && layaPos != null) {
+                    // Too close for a bow: back off along the target -> Laya line.
+                    double dx = layaPos.x - tp.x;
+                    double dz = layaPos.z - tp.z;
+                    double len = Math.hypot(dx, dz);
+                    if (len > 0.01) {
+                        double step = RANGED_HOLD_MIN - d;
+                        walk = new Vector3d(layaPos.x + dx / len * step, layaPos.y,
+                            layaPos.z + dz / len * step);
+                    }
+                }
+                if (owner.writeFollowSlot(walk)) {
+                    if (targetLastWrite == null || targetLastWrite.distance(tp) > TARGET_REPATH_MOVE) {
+                        targetLastWrite = new Vector3d(tp);
+                        owner.refreshPath();
+                    }
+                }
+                // The role's HeadMotion Watch keeps her head on the PLAYER, so while
+                // fighting she looked at the player instead of the mob. Override the head
+                // whenever the target is near, and the body at melee range.
+                if (layaPos != null) {
+                    if (rangedMode) {
+                        // 0.4.4: a shot must go where she is facing, at any range.
+                        faceHead(layaPos, tp);
+                        faceBody(layaPos, tp);
+                    } else {
+                        if (d <= 12.0) faceHead(layaPos, tp);
+                        if (d <= SWING_RANGE + 0.5) faceBody(layaPos, tp);
+                    }
                 }
             }
-            // The role's HeadMotion Watch keeps her head on the PLAYER, so while
-            // fighting she looked at the player instead of the mob. Override the head
-            // whenever the target is near, and the body at melee range.
-            if (layaPos != null) {
-                double d = distanceXZ(layaPos, tp);
-                if (d <= 12.0) faceHead(layaPos, tp);
-                if (d <= SWING_RANGE + 0.5) faceBody(layaPos, tp);
-            }
         }
-        swingTick(now, activeTarget);
+        if ("ranged".equals(combatMode)) {
+            rangedTick(now, activeTarget, layaPos);
+        } else if ("magic".equals(combatMode)) {
+            magicTick(now, activeTarget, layaPos);
+        } else {
+            swingTick(now, activeTarget);
+        }
+    }
+
+    /**
+     * 0.4.4: shoot the carried bow/crossbow/gun. Java applies the damage (the engine's
+     * projectile path needs a role channel per weapon); the visual is the weapon's
+     * draw until the interaction port lands.
+     */
+    private void rangedTick(long now, Ref<EntityStore> target, Vector3d layaPos) {
+        if (target == null || now < nextRangedShotMs) return;
+        if (owner.layaRef == null || owner.worldStore == null) return;
+        String weaponId = currentWeaponId();
+        if (rangedClassOf(weaponId) == null) return;
+        double dist = distanceToLaya(target);
+        if (dist > RANGED_RANGE) return;
+        // 0.4.4: bows and crossbows need a real arrow in her pack.
+        String rclass = rangedClassOf(weaponId);
+        if (("bow".equals(rclass) || "crossbow".equals(rclass)) && !consumeArrow()) {
+            // 0.4.4: one notice per 20 s, and through the bridge so she SPEAKS it
+            // (the chat-only line never reached TTS and repeated every scan).
+            if (now >= nextAmmoNoticeMs) {
+                nextAmmoNoticeMs = now + 20000;
+                try {
+                    owner.reportOutOfAmmo(weaponId);
+                } catch (Throwable ignored) {
+                }
+            }
+            return;
+        }
+        nextRangedShotMs = now + RANGED_SHOT_MS;
+        playRangedAnimation();
+        float amount = rangedDamage(weaponId);
+        try {
+            DamageSystems.executeDamage(target, owner.worldStore,
+                new Damage(new Damage.EntitySource(owner.layaRef), DamageCause.PROJECTILE, amount));
+        } catch (Throwable t) {
+            LayaPlugin.log("Combat: shot failed (" + weaponId + "): " + t);
+            return;
+        }
+        LayaPlugin.log("Combat: shot at " + nameOf(target) + " (" + String.format("%.1f", dist)
+            + " blocks) dmg=" + trimDamage(amount) + " hp=" + trimDamage(Math.max(0f, hpOf(target))));
+        spawnShot(target, false);
+    }
+
+    /**
+     * 0.4.4: queue a visible arrow/orb from her chest toward the target. The engine
+     * damage path is player-only, so this is the visual half of the shot.
+     */
+    private void spawnShot(Ref<EntityStore> target, boolean magic) {
+        try {
+            if (owner.layaRef == null || target == null) return;
+            Vector3d from = positionOf(owner.layaRef);
+            Vector3d tp = positionOf(target);
+            if (from == null || tp == null) return;
+            Vector3d start = new Vector3d(from.x, from.y + 1.2, from.z);
+            Vector3d dir = new Vector3d(tp.x - start.x, tp.y + 0.9 - start.y, tp.z - start.z);
+            if (dir.lengthSquared() < 1e-6) return;
+            dir.normalize();
+            ProjectileLaunchSystem.enqueue(owner.layaRef, magic, start, dir);
+        } catch (Throwable t) {
+            LayaPlugin.log("Combat: shot queue failed: " + t);
+        }
+    }
+
+    /**
+     * 0.4.4: cast the carried staff. Costs 25 of 100 mana, regenerates 4/s; damage is
+     * 5 plus weapon level, PROJECTILE cause.
+     */
+    private void magicTick(long now, Ref<EntityStore> target, Vector3d layaPos) {
+        if (target == null || now < nextMagicCastMs) return;
+        if (owner.layaRef == null || owner.worldStore == null) return;
+        String weaponId = currentWeaponId();
+        if (magicClassOf(weaponId) == null) return;
+        double dist = distanceToLaya(target);
+        if (dist > MAGIC_RANGE) return;
+        if (magic < MAGIC_COST) return;
+        magic -= MAGIC_COST;
+        nextMagicCastMs = now + MAGIC_CAST_MS;
+        playMagicAnimation();
+        float amount = magicDamage(weaponId);
+        try {
+            DamageSystems.executeDamage(target, owner.worldStore,
+                new Damage(new Damage.EntitySource(owner.layaRef), DamageCause.PROJECTILE, amount));
+        } catch (Throwable t) {
+            LayaPlugin.log("Combat: cast failed (" + weaponId + "): " + t);
+            return;
+        }
+        LayaPlugin.log("Combat: cast at " + nameOf(target) + " (" + String.format("%.1f", dist)
+            + " blocks) dmg=" + trimDamage(amount) + " mana=" + (int) magic
+            + " hp=" + trimDamage(Math.max(0f, hpOf(target))));
+        spawnShot(target, true);
+    }
+
+    /**
+     * 0.4.4: the model's bound animation among candidates, or null. The engine's
+     * animation-set map is the source of truth, so a guessed id is never played;
+     * unsupported candidates simply do not resolve.
+     */
+    private String boundAnimation(String... candidates) {
+        try {
+            if (owner.layaRef == null || owner.worldStore == null) return null;
+            ModelComponent mc = owner.worldStore.getComponent(
+                owner.layaRef, ModelComponent.getComponentType());
+            Model model = mc == null ? null : mc.getModel();
+            if (model == null) return null;
+            return model.getFirstBoundAnimationId(candidates);
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    /** One line listing the model's animation-set ids, so a missing shoot/cast is visible. */
+    private void logAnimationIdsOnce() {
+        if (animIdsLogged) return;
+        animIdsLogged = true;
+        try {
+            ModelComponent mc = owner.worldStore.getComponent(
+                owner.layaRef, ModelComponent.getComponentType());
+            Model model = mc == null ? null : mc.getModel();
+            LayaPlugin.log("Combat: model animations "
+                + (model == null ? "none" : model.getAnimationSetMap().keySet()));
+        } catch (Throwable t) {
+            LayaPlugin.log("Combat: animation list failed: " + t);
+        }
+    }
+
+    /** Play an action animation; a refusal is logged, never thrown into the tick. */
+    private void playAction(String anim, String label) {
+        try {
+            if (owner.npcEntity == null || owner.layaRef == null) return;
+            owner.npcEntity.playAnimation(owner.layaRef, AnimationSlot.Action, anim, owner.worldStore);
+        } catch (Throwable t) {
+            LayaPlugin.log("Combat: " + label + " animation '" + anim + "' refused: " + t);
+        }
+    }
+
+    /** 0.4.4: bow/crossbow/gun draw or shoot, resolved once per weapon from the item's own set. */
+    private void playRangedAnimation() {
+        logAnimationIdsOnce();
+        String weaponId = currentWeaponId();
+        if (!weaponId.equals(rangedAnimWeapon)) {
+            rangedAnimWeapon = weaponId;
+            logItemAnimationsOnce(weaponId);
+            rangedAnimId = itemAnimation("Shoot", "Release", "Fire", "Primary", "Attack",
+                "ShootBow", "BowShoot");
+            LayaPlugin.log("Combat: ranged animation for " + weaponId + " -> " + rangedAnimId);
+        }
+        // No item animation: stand still rather than swinging a bow like a sword.
+        if (rangedAnimId != null) playAction(rangedAnimId, "ranged");
+    }
+
+    /** 0.4.4: staff cast, resolved once per weapon from the item's own set. */
+    private void playMagicAnimation() {
+        logAnimationIdsOnce();
+        String weaponId = currentWeaponId();
+        if (!weaponId.equals(magicAnimWeapon)) {
+            magicAnimWeapon = weaponId;
+            logItemAnimationsOnce(weaponId);
+            magicAnimId = itemAnimation("Cast", "CastSummon", "CastSummonCharged", "CastSpell",
+                "Release", "Primary", "Attack");
+            LayaPlugin.log("Combat: magic animation for " + weaponId + " -> " + magicAnimId);
+        }
+        if (magicAnimId != null) playAction(magicAnimId, "magic");
+    }
+
+    /** 0.4.4: the held item's animation names, one line per weapon, so the map is visible. */
+    private void logItemAnimationsOnce(String weaponId) {
+        if (weaponId.equals(itemAnimLoggedFor)) return;
+        itemAnimLoggedFor = weaponId;
+        try {
+            Item item = wieldedStack() == null ? null : wieldedStack().getItem();
+            String animId = item == null ? null : item.getPlayerAnimationsId();
+            ItemPlayerAnimations anims = animId == null ? null
+                : ItemPlayerAnimations.getAssetMap().getAsset(animId);
+            LayaPlugin.log("Combat: item animations for " + weaponId + " (" + animId + ") = "
+                + (anims == null ? "none" : anims.getAnimations().keySet()));
+        } catch (Throwable t) {
+            LayaPlugin.log("Combat: item animation lookup failed: " + t);
+        }
+    }
+
+    /** 0.4.4: the first preferred animation name the held item actually defines, or null. */
+    private String itemAnimation(String... preference) {
+        try {
+            Item item = wieldedStack() == null ? null : wieldedStack().getItem();
+            String animId = item == null ? null : item.getPlayerAnimationsId();
+            ItemPlayerAnimations anims = animId == null ? null
+                : ItemPlayerAnimations.getAssetMap().getAsset(animId);
+            if (anims == null || anims.getAnimations() == null) return null;
+            java.util.Set<String> names = anims.getAnimations().keySet();
+            for (String want : preference) {
+                for (String name : names) {
+                    if (name.equalsIgnoreCase(want)) return name;
+                }
+            }
+            return null;
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    /**
+     * 0.4.4: spend one arrow or bolt from her pack. False when she has none, so ranged
+     * orders hold fire instead of firing imaginary arrows.
+     */
+    private boolean consumeArrow() {
+        try {
+            if (owner.npcEntity == null) return false;
+            Inventory inv = owner.npcEntity.getInventory();
+            if (inv == null) return false;
+            ItemContainer[] sections = {
+                inv.getHotbar(), inv.getStorage(), inv.getTools(),
+                inv.getBackpack(), inv.getUtility()
+            };
+            for (ItemContainer section : sections) {
+                if (section == null) continue;
+                for (short s = 0; s < section.getCapacity(); s++) {
+                    ItemStack st = section.getItemStack(s);
+                    if (st == null || ItemStack.isEmpty(st)) continue;
+                    String id = st.getItemId();
+                    if (id == null) continue;
+                    String low = id.toLowerCase();
+                    if (!low.contains("arrow") && !low.contains("bolt")) continue;
+                    int q = st.getQuantity();
+                    if (q <= 0) continue;
+                    if (q == 1) {
+                        section.setItemStackForSlot(s, null);
+                    } else {
+                        section.setItemStackForSlot(s, st.withQuantity(q - 1));
+                    }
+                    return true;
+                }
+            }
+        } catch (Throwable t) {
+            LayaPlugin.log("Combat: arrow use failed: " + t);
+        }
+        return false;
+    }
+
+    /** Regen staff mana on the world clock, capped at 100. */
+    private void regenMagic(long now) {        if (magicLastTickMs == 0) {
+            magicLastTickMs = now;
+            return;
+        }
+        long dt = now - magicLastTickMs;
+        if (dt <= 0) return;
+        magicLastTickMs = now;
+        if (magic < MAGIC_MAX) {
+            magic = Math.min(MAGIC_MAX, magic + MAGIC_REGEN_PER_S * (dt / 1000f));
+        }
     }
 
     /**
@@ -1189,17 +1628,17 @@ class CombatController {
         final double anchorDist = Math.sqrt(adx * adx + adz * adz);
 
         if (anchorDist <= STAY_ANCHOR_ARRIVED_DISTANCE) {
-            if (stayAnchorHeld) return;   // already home and holding — nothing to do
+            if (stayAnchorHeld) return;   // already home and holding â€” nothing to do
             // Home: hand the hold back to the engine (the sentinel the stay one-shot uses).
             if (owner.writeFollowSlot(NPCController.CLEARED_POSITION)) {
                 owner.refreshPath();
                 stayAnchorHeld = true;
                 // Task 6 (ruling 6): re-anchor the follow ring cleanly on the frame that
-                // the stay hold is restored — the same bookkeeping the stay one-shot does.
+                // the stay hold is restored â€” the same bookkeeping the stay one-shot does.
                 owner.activeTarget = false;
                 owner.followAnchor = null;
                 owner.lastWrittenSlot = null;
-                LayaPlugin.log("Combat: back on the stay anchor — holding position");
+                LayaPlugin.log("Combat: back on the stay anchor â€” holding position");
             }
             return;
         }
@@ -1218,7 +1657,7 @@ class CombatController {
     /**
      * Cancel a live mine/gather task so combat can take movement (world thread).
      * Delegates to {@link NPCController#cancelTaskForCombat()}, the single
-     * implementation of the cancel — no extra chat line (spec: no extra events).
+     * implementation of the cancel â€” no extra chat line (spec: no extra events).
      * Called by Task 6 the first time combat takes movement for a target.
      */
     void cancelTask() {
@@ -1227,7 +1666,7 @@ class CombatController {
 
     /**
      * Task 4 hook for Task 6: a NEW fight has started, so the per-engagement state is
-     * re-armed — the unarmed line may fire again, the weapon is drawn immediately
+     * re-armed â€” the unarmed line may fire again, the weapon is drawn immediately
      * (spec section 4: "on target acquire") and the swing cadence starts from now.
      * World-thread only.
      */
@@ -1325,12 +1764,67 @@ class CombatController {
         return null;   // Bow / Crossbow / Staff / Gun / Shield / anything else
     }
 
+    /** 0.4.4: a bow, crossbow or gun id, or null. */
+    static String rangedClassOf(String itemId) {
+        if (itemId == null) return null;
+        String id = itemId.toLowerCase();
+        if (id.contains("crossbow")) return "crossbow";
+        if (id.contains("bow")) return "bow";
+        if (id.contains("gun") || id.contains("rifle") || id.contains("pistol")
+                || id.contains("blunderbuss")) return "gun";
+        return null;
+    }
+
+    /** 0.4.4: a staff, wand or other magic focus id, or null. */
+    static String magicClassOf(String itemId) {
+        if (itemId == null) return null;
+        String id = itemId.toLowerCase();
+        if (id.contains("staff") || id.contains("wand") || id.contains("spell")
+                || id.contains("tome") || id.contains("grimoire") || id.contains("scepter")
+                || id.contains("sceptre") || id.contains("focus")) return "staff";
+        return null;
+    }
+
+    /** 0.4.4: which combat mode owns this item ("melee" | "ranged" | "magic"), or null. */
+    static String familyClassOf(String itemId) {
+        if (weaponClassOf(itemId) != null) return "melee";
+        if (magicClassOf(itemId) != null) return "magic";
+        if (rangedClassOf(itemId) != null) return "ranged";
+        return null;
+    }
+
+    /** 0.4.4: a shield by id. */
+    static boolean isShield(String itemId) {
+        return itemId != null && itemId.toLowerCase().contains("shield");
+    }
+
+    /**
+     * 0.4.4: weapons that occupy both hands, so a shield cannot be shown with them.
+     * Measured in game: the mace hides the offhand (two-handed grip), the cobalt sword
+     * does not. Keep this list to what the model actually reaches for.
+     */
+    static boolean isTwoHanded(String itemId) {
+        if (itemId == null) return false;
+        String id = itemId.toLowerCase();
+        return id.contains("battleaxe") || id.contains("longsword") || id.contains("greatsword")
+            || id.contains("warhammer") || id.contains("halberd") || id.contains("greataxe")
+            || id.contains("mace") || id.contains("club");
+    }
+
     /**
      * Spec section 4: every melee weapon in her six inventory sections
      * (hotbar, storage, tools, backpack, utility, armor), best first. A non-melee
-     * item — including a ranged weapon, a shield or a tool — never appears.
+     * item â€” including a ranged weapon, a shield or a tool â€” never appears.
      */
     private java.util.List<WeaponRef> findWeapons() {
+        return findWeapons("melee");
+    }
+
+    /**
+     * 0.4.4: every carried item of one combat family ("melee" | "ranged" | "magic"),
+     * best first. Same sections and ranking as the melee scan.
+     */
+    private java.util.List<WeaponRef> findWeapons(String family) {
         java.util.List<WeaponRef> found = new java.util.ArrayList<>();
         if (owner.npcEntity == null) return found;
         Inventory inv;
@@ -1354,7 +1848,7 @@ class CombatController {
                     continue;
                 }
                 if (st == null || ItemStack.isEmpty(st)) continue;
-                if (weaponClassOf(st.getItemId()) == null) continue;
+                if (!family.equals(familyClassOf(st.getItemId()))) continue;
                 found.add(new WeaponRef(section, s, st));
             }
         }
@@ -1375,7 +1869,17 @@ class CombatController {
      */
     void ensureWeaponEquipped(long now) {
         if (owner.npcEntity == null || owner.layaRef == null || owner.worldStore == null) return;
-        java.util.List<WeaponRef> weapons = findWeapons();
+        java.util.List<WeaponRef> weapons = findWeapons(combatMode);
+        if (weapons.isEmpty() && !"melee".equals(combatMode)) {
+            // 0.4.4: no bow/staff in her pack - fall back to melee rather than stand
+            // there. The carried list is what makes a missing magic id visible.
+            if (!combatMode.equals(noFamilyWeaponLogged)) {
+                noFamilyWeaponLogged = combatMode;
+                LayaPlugin.log("Combat: no " + combatMode + " weapon in her pack - using melee (carrying: "
+                    + carriedItemIds() + ")");
+            }
+            weapons = findWeapons("melee");
+        }
         if (weapons.isEmpty()) {
             noAnimationId = null;
             if (!unarmedLogged) {
@@ -1384,6 +1888,25 @@ class CombatController {
             }
             return;
         }
+        if ("defend".equals(stance) && "melee".equals(combatMode)) {
+            Inventory inv = null;
+            try {
+                inv = owner.npcEntity.getInventory();
+            } catch (Throwable ignored) {
+            }
+            if (inv != null) defendLoadout(inv);
+            // 0.4.4: with a shield up, prefer a one-handed weapon in the hand.
+            java.util.List<WeaponRef> oneHand = new java.util.ArrayList<>();
+            for (WeaponRef w : weapons) {
+                if (!isTwoHanded(w.id)) oneHand.add(w);
+            }
+            if (!oneHand.isEmpty()) {
+                weapons = oneHand;
+            } else if (!weapons.isEmpty()) {
+                LayaPlugin.log("Combat: no one-handed weapon - " + weapons.get(0).id
+                    + " is two-handed, so the shield stays hidden");
+            }
+        }
         WeaponRef best = weapons.get(0);
         if (!equipWeaponInto(best)) return;   // the failure was already logged truthfully
         LayaPlugin.log("Combat: weapon " + best.id + " quality=" + best.quality
@@ -1391,10 +1914,181 @@ class CombatController {
     }
 
     /**
+     * 0.4.4: defend puts the shield in the OFFHAND (utility slot 0, the slot the engine
+     * renders as leftHandItemId) and a one-handed weapon in the hand. The old attempt
+     * only selected the slot; this one also marks the utility component outdated so the
+     * client actually receives the equipment update.
+     */
+    private boolean defendLoadout(Inventory inv) {
+        try {
+            WeaponRef shield = findBestShield(inv);
+            if (shield == null) return false;
+            if (!placeShieldInOffhand(inv, shield)) {
+                LayaPlugin.log("Combat: shield could not reach the offhand");
+                return false;
+            }
+            if (owner.layaRef != null && owner.worldStore != null) {
+                InventoryComponent.Utility util = owner.worldStore.getComponent(
+                    owner.layaRef, InventoryComponent.Utility.getComponentType());
+                if (util != null) {
+                    util.setActiveSlot((byte) 0, owner.layaRef, owner.worldStore);
+                    util.setOutdatedEquipment(true);   // forces the left-hand sync
+                }
+            }
+            LayaPlugin.log("Combat: shield " + shield.id + " -> offhand");
+            return true;
+        } catch (Throwable t) {
+            LayaPlugin.log("Combat: defend loadout threw: " + t);
+            return false;
+        }
+    }
+
+    /** Free storage slot, or -1. */
+    private static short freeStorageSlot(ItemContainer storage) {
+        if (storage == null) return -1;
+        for (short s = 0; s < storage.getCapacity(); s++) {
+            ItemStack st = storage.getItemStack(s);
+            if (st == null || ItemStack.isEmpty(st)) return s;
+        }
+        return -1;
+    }
+
+    /** Move one stack, targeted first, then by direct writes. True when the id landed. */
+    private boolean moveStack(ItemContainer src, short srcSlot, ItemContainer dst, short dstSlot, String id) {
+        try {
+            ItemStack stack = src.getItemStack(srcSlot);
+            if (stack == null || ItemStack.isEmpty(stack)) return false;
+            int qty = stack.getQuantity();
+            try {
+                if (src.moveItemStackFromSlotToSlot(srcSlot, qty, dst, dstSlot).succeeded()
+                        && id.equals(idAt(dst, dstSlot))) {
+                    return true;
+                }
+            } catch (Throwable t) {
+                LayaPlugin.log("Combat: stack move threw: " + t);
+            }
+            src.setItemStackForSlot(srcSlot, null);
+            dst.setItemStackForSlot(dstSlot, stack);
+            return id.equals(idAt(dst, dstSlot));
+        } catch (Throwable t) {
+            LayaPlugin.log("Combat: stack move failed: " + t);
+            return false;
+        }
+    }
+
+    /** Get the shield into utility slot 0 without losing whatever was there. */
+    private boolean placeShieldInOffhand(Inventory inv, WeaponRef shield) {
+        try {
+            ItemContainer util = inv.getUtility();
+            ItemContainer storage = inv.getStorage();
+            if (util == null || util.getCapacity() < 1 || storage == null) return false;
+            if (shield.container == util && shield.slot == 0) return true;
+
+            ItemStack atOff = util.getItemStack((short) 0);
+            if (atOff != null && !ItemStack.isEmpty(atOff)) {
+                short out = freeStorageSlot(storage);
+                if (out < 0) return false;
+                String offId = atOff.getItemId();
+                if (!moveStack(util, (short) 0, storage, out, offId)) return false;
+                shield = findBestShield(inv);
+                if (shield == null) return false;
+            }
+            if (shield.container != storage) {
+                short free = freeStorageSlot(storage);
+                if (free < 0) return false;
+                if (!moveStack(shield.container, shield.slot, storage, free, shield.id)) return false;
+                shield = new WeaponRef(storage, free, storage.getItemStack(free));
+            }
+            return moveStack(shield.container, shield.slot, util, (short) 0, shield.id);
+        } catch (Throwable t) {
+            LayaPlugin.log("Combat: shield to offhand failed: " + t);
+            return false;
+        }
+    }
+
+    /** 0.4.4: the best shield in any section, or null. */
+    private WeaponRef findBestShield(Inventory inv) {        WeaponRef best = null;
+        ItemContainer[] sections = {
+            inv.getHotbar(), inv.getStorage(), inv.getTools(),
+            inv.getBackpack(), inv.getUtility(), inv.getArmor()
+        };
+        for (ItemContainer section : sections) {
+            if (section == null) continue;
+            for (short s = 0; s < section.getCapacity(); s++) {
+                ItemStack st = section.getItemStack(s);
+                if (st == null || ItemStack.isEmpty(st) || !isShield(st.getItemId())) continue;
+                WeaponRef ref = new WeaponRef(section, s, st);
+                if (best == null || compareWeapons(ref, best) < 0) best = ref;
+            }
+        }
+        return best;
+    }
+
+    /**
+     * 0.4.4: the engine refuses a direct utility -> hotbar swap (the weapon equip log
+     * said so), so move the shield to a free storage slot first, then equip it from
+     * there - storage -> hotbar is the path that already works for weapons.
+     */
+    private boolean equipShieldFromUtility(WeaponRef shield, Inventory inv) {
+        try {
+            ItemContainer util = inv.getUtility();
+            ItemContainer storage = inv.getStorage();
+            if (util == null || storage == null) return false;
+            short free = -1;
+            for (short s = 0; s < storage.getCapacity(); s++) {
+                ItemStack st = storage.getItemStack(s);
+                if (st == null || ItemStack.isEmpty(st)) {
+                    free = s;
+                    break;
+                }
+            }
+            if (free < 0) {
+                LayaPlugin.log("Combat: shield held back - no free storage slot");
+                return false;
+            }
+            ItemStack stack = util.getItemStack(shield.slot);
+            if (stack == null || ItemStack.isEmpty(stack)) return false;
+            int qty = stack.getQuantity();
+            boolean moved = false;
+            try {
+                moved = util.moveItemStackFromSlotToSlot(shield.slot, qty, storage, free).succeeded()
+                    && shield.id.equals(idAt(storage, free));
+            } catch (Throwable t) {
+                LayaPlugin.log("Combat: shield move threw: " + t);
+            }
+            if (!moved) {
+                util.setItemStackForSlot(shield.slot, null);
+                storage.setItemStackForSlot(free, stack);
+                moved = shield.id.equals(idAt(storage, free));
+            }
+            if (!moved) {
+                LayaPlugin.log("Combat: shield could not leave the utility slot");
+                return false;
+            }
+            return equipWeaponInto(new WeaponRef(storage, free, storage.getItemStack(free)));
+        } catch (Throwable t) {
+            LayaPlugin.log("Combat: shield move failed: " + t);
+            return false;
+        }
+    }
+
+    /** 0.4.4: make the offhand slot actually held (kept for the cosmetic offhand path). */
+    private void selectUtilitySlot(Inventory inv, byte slot) {
+        try {
+            inv.setActiveUtilitySlot(owner.layaRef, slot, owner.worldStore);
+            LayaPlugin.log("Combat: offhand -> utility " + slot
+                + " (active=" + inv.getActiveUtilitySlot()
+                + ", item=" + idAt(inv.getUtility(), slot) + ")");
+        } catch (Throwable t) {
+            LayaPlugin.log("Combat: offhand select failed: " + t);
+        }
+    }
+
+    /**
      * Move {@code chosen}'s stack into the ACTIVE hotbar slot and select it, swapping
      * the old active item back into the slot the weapon came from (spec section 4).
      *
-     * <p>No item is ever duplicated or destroyed. The swap has to name BOTH slots —
+     * <p>No item is ever duplicated or destroyed. The swap has to name BOTH slots â€”
      * the gift pattern's {@code moveItemStackFromSlot(slot, qty, dest)} is an
      * <em>add-anywhere</em> call whose destination slot the engine picks, so it can never
      * write into a chosen (and normally occupied) active slot; it would land the weapon
@@ -1403,7 +2097,7 @@ class CombatController {
      * <p>Both stacks are read into locals UP FRONT and every write is one of:
      *  - a targeted engine move ({@code moveItemStackFromSlotToSlot}); or
      *  - a {@code setItemStackForSlot} write that only ever overwrites a slot already read
-     *    into a local — the weapon to {@code activeSlot} first (its source slot is left
+     *    into a local â€” the weapon to {@code activeSlot} first (its source slot is left
      *    holding the same stack until the weapon has landed, so nothing is ever
      *    unreferenced), then the old active item into the now-free source slot.
      *
@@ -1426,15 +2120,19 @@ class CombatController {
         ItemContainer hotbar = inv.getHotbar();
         if (hotbar == null) return false;
 
-        int active = inv.getActiveHotbarSlot();
-        if (active < 0 || active >= hotbar.getCapacity()) return false;
+        int active = 0;   // 0.4.4: hotbar 0 is the dedicated weapon slot in the equipped panel
+        if (active >= hotbar.getCapacity()) return false;
         short activeSlot = (short) active;
+        try {
+            inv.setActiveHotbarSlot(owner.layaRef, (byte) 0, owner.worldStore);
+        } catch (Throwable ignored) {
+        }
         String weaponId = chosen.id;
         chosen = resolveToCurrentSlot(inv, weaponId, chosen, activeSlot);
         ItemContainer source = chosen.container;
         short sourceSlot = chosen.slot;
 
-        // Already in a hotbar slot: selecting it IS the equip — neither slot is touched.
+        // Already in a hotbar slot: selecting it IS the equip â€” neither slot is touched.
         if (source == hotbar) {
             if (activeSlot != chosen.slot) {
                 inv.setActiveHotbarSlot(owner.layaRef, (byte) chosen.slot, owner.worldStore);
@@ -1464,7 +2162,7 @@ class CombatController {
             LayaPlugin.log("Combat: weapon move threw (" + weaponId + "): " + t);
         }
 
-        // --- Path B: explicit order — weapon to activeSlot, THEN previous to sourceSlot ---
+        // --- Path B: explicit order â€” weapon to activeSlot, THEN previous to sourceSlot ---
         // Only reached when Path A wrote nothing (its verify failure is rolled back first,
         // which is safe because both originals are still held in locals).
         if (!swapped) {
@@ -1476,9 +2174,9 @@ class CombatController {
         if (!swapped) {
             restoreOriginals(source, sourceSlot, hotbar, activeSlot, weapon, previous);
             boolean stillThere = weaponId.equals(idAt(source, sourceSlot));
-            LayaPlugin.log("Combat: weapon equip FAILED — " + weaponId
+            LayaPlugin.log("Combat: weapon equip FAILED â€” " + weaponId
                 + " could not be swapped into hotbar " + activeSlot
-                + (stillThere ? " (left where it was)" : " (MISSING from slot " + sourceSlot + " — check her pack)"));
+                + (stillThere ? " (left where it was)" : " (MISSING from slot " + sourceSlot + " â€” check her pack)"));
             return false;
         }
 
@@ -1494,7 +2192,7 @@ class CombatController {
 
     /**
      * Path B write order, with both stacks already captured in locals. The weapon goes
-     * into the active slot FIRST, while its source slot still holds the same stack — so
+     * into the active slot FIRST, while its source slot still holds the same stack â€” so
      * if the source slot can never be cleared afterwards nothing is lost, the verify
      * simply fails and both originals are restored. Only once the weapon is confirmed at
      * {@code activeSlot} is the old active item written into the (now free) source slot.
@@ -1519,8 +2217,8 @@ class CombatController {
 
     /**
      * End state of Path A: the weapon (by id, full quantity) at {@code activeSlot} and the
-     * weapon's source slot empty. A same-id merge is accepted — the two stacks become one
-     * at {@code activeSlot} and the source slot is left cleared — because no item was lost.
+     * weapon's source slot empty. A same-id merge is accepted â€” the two stacks become one
+     * at {@code activeSlot} and the source slot is left cleared â€” because no item was lost.
      */
     private boolean mergedLanded(ItemContainer source, short sourceSlot, ItemContainer hotbar,
                                  short activeSlot, String weaponId, int weaponQty) {
@@ -1543,8 +2241,8 @@ class CombatController {
     }
 
     /**
-     * Restore BOTH originals exactly — the weapon to its source slot and the old active
-     * item to the active slot — from the locals captured before any write. Used both to
+     * Restore BOTH originals exactly â€” the weapon to its source slot and the old active
+     * item to the active slot â€” from the locals captured before any write. Used both to
      * undo a partially-applied Path A and as the failure rollback; a stack that has not
      * moved is simply written back to where it was.
      */
@@ -1705,7 +2403,7 @@ class CombatController {
     /**
      * The health stat of {@code ref}, or {@code -1} when it cannot be read (no store,
      * no Ref, no EntityStatMap, or a null health stat). Preflight ruling: this is the
-     * single HP helper — Task 5 delegates {@code getLayaHp()} to it and Task 6 uses it
+     * single HP helper â€” Task 5 delegates {@code getLayaHp()} to it and Task 6 uses it
      * for death checks.
      */
     float hpOf(Ref<EntityStore> ref) {
@@ -1866,18 +2564,37 @@ class CombatController {
         // so she visibly swung at empty air while walking to a target out of reach.
         float hp = hpOf(target);
         if (hp <= 0f) {
-            logSwingSkipOnce("Combat: swing skipped — target down");
+            logSwingSkipOnce("Combat: swing skipped â€” target down");
             return;
         }
         double dist = distanceToLaya(target);
         if (dist > SWING_RANGE) {
-            logSwingSkipOnce("Combat: swing skipped — target "
+            logSwingSkipOnce("Combat: swing skipped â€” target "
                 + String.format("%.1f", dist) + " blocks away (reach " + trimDamage((float) SWING_RANGE) + ")");
             return;
         }
 
         String anim = playSwingAnimation(weaponId);
         float amount = damageForWeapon(weaponId);
+        // 0.4.4: one stance ability on a cooldown, riding the existing swing so the
+        // damage path and the animation stay the ones that already work.
+        String ability = null;
+        if (now >= nextAbilityMs) {
+            if ("attack".equals(stance)) {
+                ability = "Power Strike";
+                amount *= 1.9f;
+            } else if ("defend".equals(stance)) {
+                ability = "Shield Bash";
+                amount *= 1.35f;
+            } else if ("stay".equals(stance) && counterReady) {
+                ability = "Guard Counter";
+                amount *= 1.6f;
+            }
+            if (ability != null) {
+                nextAbilityMs = now + ABILITY_COOLDOWN_MS;
+                counterReady = false;
+            }
+        }
         try {
             DamageSystems.executeDamage(target, owner.worldStore,
                 new Damage(new Damage.EntitySource(owner.layaRef), DamageCause.PHYSICAL, amount));
@@ -1886,8 +2603,60 @@ class CombatController {
             return;
         }
         swingCount++;
-        LayaPlugin.log("Combat: swing " + swingCount + " at " + nameOf(target)
-            + " dmg=" + trimDamage(amount) + " hp=" + trimDamage(Math.max(0f, hpOf(target))));
+        if (ability != null) {
+            LayaPlugin.log("Combat: ability " + ability + " at " + nameOf(target)
+                + " dmg=" + trimDamage(amount) + " hp=" + trimDamage(Math.max(0f, hpOf(target))));
+        } else {
+            LayaPlugin.log("Combat: swing " + swingCount + " at " + nameOf(target)
+                + " dmg=" + trimDamage(amount) + " hp=" + trimDamage(Math.max(0f, hpOf(target))));
+        }
+    }
+
+    /** 0.4.4 diagnostic: the distinct item ids in her pack, for a missing weapon family. */
+    private String carriedItemIds() {
+        try {
+            if (owner.npcEntity == null) return "none";
+            Inventory inv = owner.npcEntity.getInventory();
+            if (inv == null) return "none";
+            ItemContainer[] sections = {
+                inv.getHotbar(), inv.getStorage(), inv.getTools(),
+                inv.getBackpack(), inv.getUtility(), inv.getArmor()
+            };
+            java.util.LinkedHashSet<String> ids = new java.util.LinkedHashSet<>();
+            for (ItemContainer section : sections) {
+                if (section == null) continue;
+                for (short s = 0; s < section.getCapacity() && ids.size() < 10; s++) {
+                    ItemStack st = section.getItemStack(s);
+                    if (st == null || ItemStack.isEmpty(st)) continue;
+                    String id = st.getItemId();
+                    if (id != null && !id.isEmpty()) ids.add(id);
+                }
+            }
+            return ids.isEmpty() ? "empty" : String.join(", ", ids);
+        } catch (Throwable t) {
+            return "scan failed: " + t;
+        }
+    }
+
+    /** 0.4.4: bow/crossbow/gun damage: base 6 plus half the item level. */
+    private float rangedDamage(String weaponId) {
+        return 6.0f + 0.5f * Math.max(0, itemLevel());
+    }
+
+    /** 0.4.4: staff damage: 5 plus 0.4 per item level. */
+    private float magicDamage(String weaponId) {
+        return MAGIC_DAMAGE + 0.4f * Math.max(0, itemLevel());
+    }
+
+    /** The held item's level, 0 when unknown. */
+    private int itemLevel() {
+        try {
+            ItemStack held = wieldedStack();
+            Item item = held == null ? null : held.getItem();
+            return item == null ? 0 : item.getItemLevel();
+        } catch (Throwable t) {
+            return 0;
+        }
     }
 
     /** Damage for the wielded weapon: its own level, or unarmed when it is not melee. */
@@ -1916,8 +2685,8 @@ class CombatController {
     }
 
     /**
-     * Play the weapon's swing animation, falling back to {@code SwingRight} — once,
-     * with a log — when the engine refuses an id (client log:
+     * Play the weapon's swing animation, falling back to {@code SwingRight} â€” once,
+     * with a log â€” when the engine refuses an id (client log:
      * "No animation with id X"). Returns the id that was played.
      */
     private String playSwingAnimation(String weaponId) {
@@ -1927,7 +2696,7 @@ class CombatController {
             owner.npcEntity.playAnimation(owner.layaRef, AnimationSlot.Action, anim, owner.worldStore);
         } catch (Throwable t) {
             noAnimationId = anim;
-            LayaPlugin.log("Combat: animation '" + anim + "' refused — falling back to SwingRight (" + t + ")");
+            LayaPlugin.log("Combat: animation '" + anim + "' refused â€” falling back to SwingRight (" + t + ")");
             anim = "SwingRight";
             try {
                 owner.npcEntity.playAnimation(owner.layaRef, AnimationSlot.Action, anim, owner.worldStore);
@@ -1945,7 +2714,7 @@ class CombatController {
     // --- Task 4-7 stubs (replace bodies; signatures stay) ---
 
     /**
-     * Task 5: the player was damaged by {@code attacker} — stamp a reactive target.
+     * Task 5: the player was damaged by {@code attacker} â€” stamp a reactive target.
      * Task 6 (spec section 3): any stance, 15 s memory, "closest wins" via the stamp
      * simply being the most recent attacker. Log once per new stamp.
      */
@@ -1959,10 +2728,12 @@ class CombatController {
     }
 
     /**
-     * Task 5: Laya was damaged by {@code attacker} — stamp a reactive target.
+     * Task 5: Laya was damaged by {@code attacker} â€” stamp a reactive target.
      * Task 6 (spec section 3): the same 15 s memory as {@link #onPlayerHit}.
      */
     void onLayaHit(Ref<EntityStore> attackerRef) {
+        // 0.4.4: a hit taken in the stay stance arms the guard counter.
+        if ("stay".equals(stance)) counterReady = true;
         stampReactive(attackerRef);
     }
 
@@ -2113,7 +2884,7 @@ class CombatController {
         if (now - lastHpPinMs >= 1000L) {
             lastHpPinMs = now;
             float hp = getLayaHp();
-            // Any deviation from 1 is repaired — including 0 < hp < 1 and hp <= 0 — so
+            // Any deviation from 1 is repaired â€” including 0 < hp < 1 and hp <= 0 â€” so
             // nothing can drift the bar into a fake recovery or a fake death.
             if (hp < 0f || hp != DOWNED_HP) {
                 setLayaHp(DOWNED_HP);
@@ -2193,7 +2964,7 @@ class CombatController {
      * The channel finished: she stands up (spec section 6). Chat
      * {@code reviveDoneChat()}, HP {@link #REVIVE_HP}, {@code downed=false}, stance
      * {@code follow}, Death pose cleared, persisted, log {@code Combat: revived hp=50}.
-     * Combat does NOT auto-engage afterwards — re-issuing attack/defend is the player's
+     * Combat does NOT auto-engage afterwards â€” re-issuing attack/defend is the player's
      * choice.
      */
     private void completeRevive() {
@@ -2206,7 +2977,7 @@ class CombatController {
         playStatusAnimation(STATUS_CLEAR_ANIM);
         stance = "follow";          // ruling 4: stance = follow, with no extra stance log
         resetHpWarnings();
-        // Ruling 4: no auto-engage after a pickup — drop any attack intent that was armed
+        // Ruling 4: no auto-engage after a pickup â€” drop any attack intent that was armed
         // while she was down so the next tick does not spuriously hunt.
         explicitAttackPending = false;
         stanceReleasePending = false;
@@ -2218,7 +2989,7 @@ class CombatController {
 
     /**
      * Boot restore (spec section 6): if the persisted state says downed, put the just
-     * spawned Laya back down at 1 HP with the Death pose. NO chat warning on boot — the
+     * spawned Laya back down at 1 HP with the Death pose. NO chat warning on boot â€” the
      * warning is a live-entry-only line. Called from {@code ensureSpawned} right after
      * {@code loadInventory()}, so {@code loadSavedState()} has already run.
      */
@@ -2305,3 +3076,4 @@ class CombatController {
     /** The Status-slot id the engine last refused (one log line per id). */
     private String statusAnimRefused = null;
 }
+

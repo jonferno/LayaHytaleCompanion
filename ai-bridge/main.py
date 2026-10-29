@@ -551,14 +551,22 @@ def memory_block() -> str:
              if not _TRANSIENT_FACT.search(str(f))]
     if facts:
         parts.append(f"Facts {cname} remembers:\n" + "\n".join(f"- {f}" for f in facts))
-    chat = [c for c in MEMORY.get("chat", [])[-12:]
+    chat = [c for c in MEMORY.get("chat", [])[-16:]
             if c.get("p")
-            and not str(c.get("p", "")).startswith("(observed:")
-            # Task 4: an idle line is Laya speaking unprompted, not a player
-            # turn - rendering it as "Player: (idle)" would fake one.
-            and not str(c.get("p", "")).startswith("(idle)")]
+            and not str(c.get("p", "")).startswith("(observed:")]
     if chat:
-        lines = [f"Player: {c.get('p','')}\n{cname}: {c.get('l','')}" for c in chat[-8:]]
+        # 0.4.4: idle lines ARE her lines. They used to be filtered out entirely, so a
+        # player answering "what do you mean by that?" had no idea what she had just
+        # said. Render them as her, unprompted, never as a player turn.
+        lines = []
+        for c in chat[-10:]:
+            p = str(c.get("p", ""))
+            l = str(c.get("l", ""))
+            if p.startswith("(idle)"):
+                if l:
+                    lines.append(f"{cname} (unprompted): {l}")
+            else:
+                lines.append(f"Player: {p}\n{cname}: {l}")
         parts.append("Recent conversation:\n" + "\n".join(lines))
     return "\n\n".join(parts)
 

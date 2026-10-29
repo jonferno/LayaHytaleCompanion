@@ -210,6 +210,7 @@ public final class LayaHudController {
             // target is actually engaged (attack stance idle should read "following").
             String state;
             String task = npc.hudTask();
+            String mode = npc.hudCombatMode();
             if (downed) {
                 state = null;
             } else if (npc.hudEngaged()) {
@@ -217,13 +218,20 @@ public final class LayaHudController {
             } else if (task != null) {
                 state = task;
             } else {
+                // 0.4.4: the stance owns the card while she is not fighting a target.
+                // Only attack shows the weapon family, so bow/staff cannot stick on the
+                // card after a follow/stay order (that was the "can't switch out" bug).
                 String st = npc.hudStance();
-                state = mapStance("attack".equals(st) ? "follow" : st);
+                if ("attack".equals(st) && ("ranged".equals(mode) || "magic".equals(mode))) {
+                    state = mode;
+                } else {
+                    state = mapStance(st);
+                }
             }
             LayaHud hud = hudFor(playerRef, player);
             if (hud != null) {
                 hud.setName(npc.getCompanionName());
-                hud.setValues(hp, npc.hudMaxHp(), state, downed);
+                hud.setValues(hp, npc.hudMaxHp(), state, downed, mode, npc.hudMana());
                 String revive = "";
                 if (downed) {
                     if (npc.hudChanneling()) {

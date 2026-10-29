@@ -16,6 +16,29 @@
   <strong>Tested on Hytale 0.7.4.</strong>
 </p>
 
+## What's new in 0.4.4
+
+- **She is on the map.** Her marker follows her across chunks, uses her current name, and
+  disappears when she is not spawned. This was the one 0.4.3 feature that never worked.
+- **One menu for everything.** Right-click her for a single companion page: your pack, her
+  pack, an equipped panel with a dedicated weapon slot, a Stack & Sort button in the pack's
+  last cell, and a bottom row of buttons for Follow, Stay, Attack, Defend, Ranged and Magic.
+- **Ranged and magic.** Bows, crossbows and guns fire visible arrows and bolts out to 25
+  blocks and spend arrows from her pack; staves and wands cast orbs out to 20 blocks from a
+  100-point mana pool. Both use the weapon's real shoot and cast animations. Out of arrows she
+  holds fire and tells you in her own voice.
+- **Combat modes.** Melee, ranged and magic are separate weapon families. The HUD shows the
+  sword, bow or staff she is holding and a blue mana bar under her health.
+- **Stance abilities.** Attack gets Power Strike (x1.9), Defend gets Shield Bash (x1.35), and
+  Stay gets Guard Counter (x1.6 after taking a hit), each on a 4.5 s cooldown.
+- **Defend draws the shield.** The shield goes to her offhand and she swaps to a one-handed
+  weapon, so it is actually visible instead of hidden behind a two-handed grip.
+- **Named targets work at range.** "Kill that rabbit" searches 48 blocks, keeps re-checking
+  your crosshair, and says so when the animal is genuinely not there.
+- **Fixes.** Her idle lines are now part of the conversation, so answering one makes sense,
+  and if her entity ever vanishes she respawns beside you within seconds instead of leaving
+  teleport refused.
+
 ## What's new in 0.4.3
 
 - **Free mode.** "Keep mining stone until I say stop" now runs until you stop. She works
@@ -49,13 +72,6 @@
 - **Cleaner installs.** Each folder's launcher now points config at itself, so names,
   HUD settings and saves no longer leak between installs. Attack acknowledgements
   also know which creature you named.
-
-## What's new in 0.4.1
-
-- **"Hold here" actually holds.** She no longer teleports to you once you walk past
-  32 blocks, and the stuck watchdog no longer treats standing still as stuck.
-- **Revive messages use her name.** Rename her in Settings and the downed, pickup and
-  recovered lines follow, instead of always saying "Laya".
 
 ## Why is she called Laya?
 
@@ -369,6 +385,11 @@ The web page at <http://127.0.0.1:8788> has two areas:
 
 ## Next up
 
+- **A real ability per weapon style.** 0.4.4 gave every mode its frame (one stance ability,
+  cooldowns, mana, ammo, visible projectiles). Next is a distinct ability per weapon class:
+  cleave for axes, whirlwind for two-handers, quick stabs for daggers, spear reach and throw,
+  bow volley and charged shot, crossbow reload, frost and flame staves. The table and the
+  engine notes are in [`docs/combat-abilities-plan.md`](docs/combat-abilities-plan.md).
 - **The light-boosted layout**: Hytale grows crops up to twice as fast when a light
   source sits in the middle of the plot (`LightLevel` growth modifier, x2, satisfied
   by a lamp or torch alone), so the next layout will place the light and ring the

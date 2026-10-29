@@ -8,11 +8,15 @@ import com.hypixel.hytale.event.EventRegistry;
 import com.hypixel.hytale.server.core.event.events.ShutdownEvent;
 import com.hypixel.hytale.server.core.plugin.JavaPlugin;
 import com.hypixel.hytale.server.core.plugin.JavaPluginInit;
+import com.hypixel.hytale.server.core.universe.Universe;
+import com.hypixel.hytale.server.core.universe.world.World;
+import com.hypixel.hytale.server.core.universe.world.events.AddWorldEvent;
 import com.jonferno.laya.bridge.Bridge;
 import com.jonferno.laya.commands.LayaCommand;
 import com.jonferno.laya.events.ChatListener;
 import com.jonferno.laya.hud.LayaHudController;
 import com.jonferno.laya.npc.NPCController;
+import com.jonferno.laya.world.CompanionMapMarker;
 
 public class LayaPlugin extends JavaPlugin {
 
@@ -21,6 +25,7 @@ public class LayaPlugin extends JavaPlugin {
     private final Bridge bridge;
     private final NPCController npcController;
     private final LayaHudController hudController;
+    private final CompanionMapMarker mapMarker;
 
     public LayaPlugin(JavaPluginInit init) {
         super(init);
@@ -28,6 +33,7 @@ public class LayaPlugin extends JavaPlugin {
         this.bridge = new Bridge();
         this.npcController = new NPCController(this);
         this.hudController = new LayaHudController(this);
+        this.mapMarker = new CompanionMapMarker(this.npcController);
     }
 
     @Override
@@ -58,7 +64,12 @@ public class LayaPlugin extends JavaPlugin {
         // M1: capture world on join + auto-spawn Laya as a real NPC_Elf
         getEventRegistry().registerGlobal(
             com.hypixel.hytale.server.core.event.events.player.AddPlayerToWorldEvent.class,
-            event -> npcController.captureWorld(event.getWorld())
+            event -> {
+                npcController.captureWorld(event.getWorld());
+                // 0.4.4: registering again for the same world is a no-op replace;
+                // this covers a world created before the plugin started watching.
+                addMapMarkerProvider(event.getWorld());
+            }
         );
         getEventRegistry().registerGlobal(
             com.hypixel.hytale.server.core.event.events.player.PlayerReadyEvent.class,
@@ -100,11 +111,49 @@ public class LayaPlugin extends JavaPlugin {
                 com.hypixel.hytale.server.core.modules.entity.damage.DamageModule.get().getFilterDamageGroup(),
                 npcController.getCombat()));
 
+        // 0.4.4: visible projectiles. A tick system is the only place with a
+        // CommandBuffer, which ProjectileModule.spawnProjectile requires.
+        getEntityStoreRegistry().registerSystem(
+            new com.jonferno.laya.npc.ProjectileLaunchSystem());
+
         bridge.start();
         npcController.start();
 
+        // 0.4.4: Laya on the world map, for every world from plugin start.
+        registerMapMarkerProviders();
+
         log("Config: " + com.jonferno.laya.npc.NPCController.configPathsSummary());
         log("Laya plugin loaded. Nervous system bridge pending.");
+    }
+
+    /**
+     * 0.4.4: register the map marker provider for every world, and for worlds
+     * created later. The 0.4.3 path registered on her first follow tick and read
+     * the entity store from the map thread inside a catch-all, so the marker never
+     * appeared and nothing was logged. The provider now reads a snapshot instead.
+     */
+    private void registerMapMarkerProviders() {
+        try {
+            getEventRegistry().registerGlobal(
+                AddWorldEvent.class,
+                event -> addMapMarkerProvider(event.getWorld()));
+            for (World world : Universe.get().getWorlds().values()) {
+                addMapMarkerProvider(world);
+            }
+        } catch (Throwable t) {
+            log("Map: provider registration failed: " + t);
+        }
+    }
+
+    private void addMapMarkerProvider(World world) {
+        if (world == null) return;
+        try {
+            world.getWorldMapManager().addMarkerProvider(
+                CompanionMapMarker.PROVIDER_KEY, mapMarker);
+            log("Map: companion marker provider added to world '" + world.getName() + "'");
+        } catch (Throwable t) {
+            log("Map: could not add marker provider to world '" + world.getName() + "': " + t);
+        }
     }
 
     public static void stopBridge() {

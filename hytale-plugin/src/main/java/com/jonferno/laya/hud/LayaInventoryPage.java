@@ -13,15 +13,19 @@ import com.hypixel.hytale.server.core.ui.builder.UICommandBuilder;
 import com.hypixel.hytale.server.core.ui.builder.UIEventBuilder;
 import com.hypixel.hytale.server.core.universe.PlayerRef;
 import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
+import com.jonferno.laya.npc.CombatController;
 import com.jonferno.laya.npc.NPCController;
 
 /**
- * Laya's custom pack + equipment page.
+ * Laya's all-in-one interact menu: pack and equipment plus the command bar.
  *
- * <p>The native container window cannot render arbitrary armor/utility sections
- * beside the pack, and a custom page suppresses it. This page renders both:
- * 36 pack slots on the left and five equipment slots on the right. Click a slot
- * to select it, then click a target slot to move/swap. Auto-equip still runs for
+ * <p>0.4.4: no tabs. Everything is on the one page; the bottom row is a strip of
+ * dark square icon buttons (Follow, Stay, Attack, Defend, Ranged, Magic) that each
+ * act on click, with hover and pressed states. Future commands (farm, mine, chop,
+ * gather) become more boxes in the same strip.
+ *
+ * <p>Inventory: 36 pack slots on the left, five equipment slots on the right. Click a
+ * slot to select it, then click a target slot to move/swap. Auto-equip still runs for
  * gifted gear.
  */
 public final class LayaInventoryPage extends InteractiveCustomUIPage<LayaInventoryPage.PageEventData> {
@@ -42,31 +46,72 @@ public final class LayaInventoryPage extends InteractiveCustomUIPage<LayaInvento
         // her pack column (spec: the name everywhere the player sees it).
         String cname = controller.getCompanionName();
         if (cname == null || cname.isBlank()) cname = "Laya";
-        b.set("#Title.Text", "Your Inventory  |  " + cname);
+        b.set("#Title.Text", cname + "  |  Companion");
         b.set("#LayaLabel.Text", cname + "'s Pack");
+
         for (int i = 0; i < 45; i++) { // player
             setSlot(b, "#Player" + i + "Icon", controller.uiItemId(100 + i),
                 controller.uiQuantity(100 + i));
             bind(events, "#Player" + i, 100 + i);
         }
-        for (int i = 0; i < 36; i++) {
-            setSlot(b, "#Pack" + i + "Icon", controller.uiItemId(i), controller.uiQuantity(i));
-            bind(events, "#Pack" + i, i);
+        for (int i = 0; i < 35; i++) {
+            // 0.4.4: ui index 0 is the dedicated weapon slot in the equipped column,
+            // so the pack grid starts at 1 and does not duplicate it.
+            setSlot(b, "#Pack" + i + "Icon", controller.uiItemId(i + 1),
+                controller.uiQuantity(i + 1));
+            bind(events, "#Pack" + i, i + 1);
         }
         for (int i = 0; i < 5; i++) {
             setSlot(b, "#Gear" + i + "Icon", controller.uiItemId(36 + i),
                 controller.uiQuantity(36 + i));
             bind(events, "#Gear" + i, 36 + i);
         }
+        setSlot(b, "#GearWeaponIcon", controller.uiItemId(0), controller.uiQuantity(0));
+        bind(events, "#GearWeapon", 0);
         events.addEventBinding(CustomUIEventBindingType.Activating, "#SortButton",
-            com.hypixel.hytale.server.core.ui.builder.EventData.of("Action", "sort"));
+            EventData.of("Action", "sort"));
         b.set("#Selection.Text", selected < 0
             ? "Click an item, then click a target slot."
             : "Selected slot " + selected + " - now click a target.");
+
+        // Command bar: stance and weapon-family buttons.
+        events.addEventBinding(CustomUIEventBindingType.Activating, "#BtnFollow",
+            EventData.of("Action", "stance").append("Value", "follow"));
+        events.addEventBinding(CustomUIEventBindingType.Activating, "#BtnStay",
+            EventData.of("Action", "stance").append("Value", "stay"));
+        events.addEventBinding(CustomUIEventBindingType.Activating, "#BtnAttack",
+            EventData.of("Action", "stance").append("Value", "attack"));
+        events.addEventBinding(CustomUIEventBindingType.Activating, "#BtnDefend",
+            EventData.of("Action", "stance").append("Value", "defend"));
+        events.addEventBinding(CustomUIEventBindingType.Activating, "#BtnRanged",
+            EventData.of("Action", "mode").append("Value", "ranged"));
+        events.addEventBinding(CustomUIEventBindingType.Activating, "#BtnMagic",
+            EventData.of("Action", "mode").append("Value", "magic"));
+
+        b.set("#CommandStatus.Text", statusLine());
+    }
+
+    /** The one-line readout under the buttons. */
+    private String statusLine() {
+        CombatController c = controller.getCombat();
+        return "Stance: " + c.getStance()
+            + "     Mode: " + c.getCombatMode()
+            + "     Mana: " + Math.round(c.magicPercent() * 100) + "%";
     }
 
     @Override
     public void handleDataEvent(Ref<EntityStore> ref, Store<EntityStore> store, PageEventData data) {
+        if (data == null) return;
+        if ("stance".equals(data.action)) {
+            controller.applyStanceButton(data.value);
+            rebuild();
+            return;
+        }
+        if ("mode".equals(data.action)) {
+            controller.applyModeButton(data.value);
+            rebuild();
+            return;
+        }
         if ("sort".equals(data.action)) {
             controller.stackAndSortLaya();
             selected = -1;
@@ -95,16 +140,27 @@ public final class LayaInventoryPage extends InteractiveCustomUIPage<LayaInvento
         rebuild();
     }
 
+    /** What the current stance does in each mode, for the status tooltip later. */
+    static String abilityFor(String mode, String stance) {
+        if ("ranged".equals(mode)) {
+            return "Volley, every 1.8 s up to 25 blocks (bow, crossbow, gun)";
+        }
+        if ("magic".equals(mode)) {
+            return "Magic Orb, 25 mana, every 2.4 s up to 20 blocks (staff, wand)";
+        }
+        if ("attack".equals(stance)) return "Power Strike, x1.9 damage, 4.5 s cooldown";
+        if ("defend".equals(stance)) return "Shield Bash, x1.35 damage, 4.5 s cooldown";
+        if ("stay".equals(stance)) return "Guard Counter, x1.6 on the first swing after a hit";
+        return "none while following";
+    }
+
     private static void bind(UIEventBuilder events, String element, int slot) {
         events.addEventBinding(CustomUIEventBindingType.Activating, element,
-            com.hypixel.hytale.server.core.ui.builder.EventData.of("Action", "select")
-                .append("Slot", Integer.toString(slot)));
+            EventData.of("Action", "select").append("Slot", Integer.toString(slot)));
         events.addEventBinding(CustomUIEventBindingType.DoubleClicking, element,
-            com.hypixel.hytale.server.core.ui.builder.EventData.of("Action", "quick")
-                .append("Slot", Integer.toString(slot)));
+            EventData.of("Action", "quick").append("Slot", Integer.toString(slot)));
         events.addEventBinding(CustomUIEventBindingType.RightClicking, element,
-            com.hypixel.hytale.server.core.ui.builder.EventData.of("Action", "quick")
-                .append("Slot", Integer.toString(slot)));
+            EventData.of("Action", "quick").append("Slot", Integer.toString(slot)));
     }
 
     private static void setSlot(UICommandBuilder b, String path, String id, int quantity) {
@@ -121,8 +177,11 @@ public final class LayaInventoryPage extends InteractiveCustomUIPage<LayaInvento
                 (d, v) -> d.slot = v, d -> d.slot).add()
             .append(new KeyedCodec<>("Action", Codec.STRING),
                 (d, v) -> d.action = v, d -> d.action).add()
+            .append(new KeyedCodec<>("Value", Codec.STRING),
+                (d, v) -> d.value = v, d -> d.value).add()
             .build();
         public String slot;
         public String action;
+        public String value;
     }
 }

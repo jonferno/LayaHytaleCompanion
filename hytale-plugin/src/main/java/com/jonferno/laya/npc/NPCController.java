@@ -34,9 +34,6 @@ import com.hypixel.hytale.server.core.modules.time.WorldTimeResource;
 import com.hypixel.hytale.server.core.util.TargetUtil;
 import com.hypixel.hytale.server.core.cosmetics.CosmeticsModule;
 import com.hypixel.hytale.server.npc.role.support.DisplayNameSupport;
-import com.hypixel.hytale.server.core.universe.world.worldmap.markers.MapMarkerBuilder;
-import com.hypixel.hytale.protocol.packets.worldmap.MapMarker;
-import com.hypixel.hytale.math.vector.Transform;
 import com.hypixel.hytale.server.core.modules.entity.player.PlayerCreativeSettings;
 import com.hypixel.hytale.server.core.modules.entity.player.PlayerSettings;
 import com.hypixel.hytale.server.core.modules.entity.player.PlayerSkinComponent;
@@ -169,6 +166,10 @@ public class NPCController {
     // gate in LayaPlugin reads it before queueing the card). Absent -> true.
     private static final String HUD_JSON = System.getenv().getOrDefault(
         "LAYA_HUD_JSON", "config/laya-hud.json");
+    // 0.4.4: the chosen combat mode (melee/ranged/magic) survives a relaunch, so a
+    // "kill that squirrel" after a restart uses the bow or staff the player picked.
+    private static final String COMBAT_JSON = System.getenv().getOrDefault(
+        "LAYA_COMBAT_JSON", "config/laya-combat.json");
     private static final double IDENTIFY_MAX_DIST = 6.4;   // 16 ray steps x 0.4 blocks
     private static final double SCAN_RADIUS = 16.0;        // mine/gather search radius (near the player)
     private static final double FREE_SCAN_RADIUS = 48.0;   // free mode: search around Laya
@@ -524,8 +525,15 @@ public class NPCController {
     private volatile int taskQualityMin = 0;   // 0 = any; 2 = Uncommon and above
     private long nextFreeScanMs = 0;
     private int freeRoamTick = 0;
-    private boolean mapMarkerRegistered = false;
-    private boolean mapProviderLogged = false;
+    // 0.4.4 map marker: a snapshot the map provider can read from its own thread.
+    // WorldMapTracker itself hops to the world executor for the same read, because
+    // the entity store must not be touched off the world thread. The follow tick
+    // publishes her position here instead, so the provider never touches the store.
+    private volatile boolean mapSpawned = false;
+    private volatile double mapX = 0, mapY = 0, mapZ = 0;
+    private volatile String mapWorldName = "";
+    /** 0.4.4: next auto-respawn attempt after the entity vanishes. */
+    private long nextRespawnMs = 0;
     private volatile int taskDoneCount = 0;
     private volatile String taskHint = "";
 
@@ -927,7 +935,7 @@ public class NPCController {
         return root.toString();
     }
 
-    /** UI index: 0..7 hotbar, 8..35 storage, 36..39 armor, 40 utility[0]. */
+    /** UI index: 0 weapon (hotbar[0]), 1..7 hotbar[1..7], 8..35 storage, 36..39 armor, 40 utility[0]. */
     private Inventory playerInventory() {
         try {
             if (playerRef == null || worldStore == null) return null;
@@ -951,7 +959,7 @@ public class NPCController {
         if (npcEntity == null) return null;
         Inventory inv = npcEntity.getInventory();
         if (inv == null) return null;
-        if (idx < 8) return inv.getHotbar();
+        if (idx < 8) return inv.getHotbar();       // 0 = dedicated weapon slot, 1..7 pack
         if (idx < 36) return inv.getStorage();
         if (idx < 40) return inv.getArmor();
         if (idx == 40) return inv.getUtility();
@@ -963,7 +971,7 @@ public class NPCController {
             int j = idx - 100;
             return (short) (j < 9 ? j : j - 9);
         }
-        if (idx < 8) return (short) idx;
+        if (idx < 8) return (short) idx;            // weapon slot is hotbar 0
         if (idx < 36) return (short) (idx - 8);
         if (idx < 40) return (short) (idx - 36);
         return 0;
@@ -1208,37 +1216,29 @@ public class NPCController {
         }
     }
 
-    /** One-time per world: a map marker that reads her live position and name. */
-    private void registerMapMarker() {
-        try {
-            if (world == null || layaRef == null) return;
-            world.getWorldMapManager().addMarkerProvider("laya_companion",
-                (w, player, collector) -> {
-                    try {
-                        if (layaRef == null || worldStore == null) return;
-                        TransformComponent t = worldStore.getComponent(
-                            layaRef, TransformComponent.getComponentType());
-                        if (t == null || t.getPosition() == null) return;
-                        MapMarker marker = new MapMarkerBuilder(
-                            "laya_companion", "UserA.png",
-                            new Transform(new Vector3d(t.getPosition())))
-                            .withCustomName(getCompanionName())
-                            .build();
-                        // addIgnoreViewDistance: her marker must show even when the map
-                        // view distance does not cover her position yet.
-                        collector.addIgnoreViewDistance(marker);
-                        if (!mapProviderLogged) {
-                            mapProviderLogged = true;
-                            plugin.log("Map: provider update ran");
-                        }
-                    } catch (Throwable ignored) {
-                    }
-                });
-            mapMarkerRegistered = true;
-            plugin.log("Map: companion marker registered");
-        } catch (Throwable t) {
-            plugin.log("Map marker registration failed: " + t);
-        }
+    /** 0.4.4: publish her live position for the map provider (world thread only). */
+    private void updateMapSnapshot(double x, double y, double z) {
+        mapX = x;
+        mapY = y;
+        mapZ = z;
+        mapSpawned = true;
+        mapWorldName = world != null ? world.getName() : "";
+    }
+
+    /** 0.4.4: true when the snapshot belongs to this world and she is spawned. */
+    public boolean isMapSnapshotLive(String worldName) {
+        return mapSpawned && worldName != null && worldName.equals(mapWorldName);
+    }
+
+    /** 0.4.4: a copy of her published position, or null when she is not on the map. */
+    public Vector3d mapMarkerPosition() {
+        if (!mapSpawned) return null;
+        return new Vector3d(mapX, mapY, mapZ);
+    }
+
+    /** 0.4.4: drop the marker snapshot when the entity is gone. */
+    private void clearMapSnapshot() {
+        mapSpawned = false;
     }
 
     /** Free mode: drop the current target but keep the order alive; the tick rescans. */
@@ -1286,6 +1286,88 @@ public class NPCController {
         return combat.hudEngaged();
     }
 
+    /** 0.4.4: the selected combat mode, so the card shows sword, bow or staff at once. */
+    public String hudCombatMode() {
+        return combat.getCombatMode();
+    }
+
+    /** 0.4.4: staff mana fraction (0..1) for the blue bar on the card. */
+    public float hudMana() {
+        return combat.magicPercent();
+    }
+
+    /** 0.4.4: combat ran dry; the bridge answers it in her voice (and speaks it). */
+    public void reportOutOfAmmo(String weapon) {
+        postEvent("out_of_ammo", "I'm out of arrows for " + weapon);
+    }
+
+    /**
+     * 0.4.4: a Ranged or Magic button. Picking a weapon family is an attack order:
+     * she goes to the attack stance and draws the best weapon of that family, so the
+     * card and the fight agree. Follow / Stay / Defend then take her out of it.
+     */
+    public void applyModeButton(String mode) {
+        if (mode == null) return;
+        following = true;
+        staying = false;
+        state.put("mode", "attack");
+        plugin.log("Laya: " + mode + " from the companion menu");
+        combat.setStance("attack", "explicit");
+        combat.setCombatMode(mode, "page");
+    }
+
+    /**
+     * 0.4.4: the interact page's command buttons. Same effects as the spoken
+     * follow / stay / attack / defend orders, without the chat plumbing. Called from
+     * the page handler, which runs on the world thread.
+     */
+    public void applyStanceButton(String stance) {
+        if (stance == null) return;
+        // 0.4.4: a stance button ends the bow/staff selection, so the card and the
+        // weapon go back to melee. The Ranged/Magic buttons pick the family again.
+        if (!"melee".equals(combat.getCombatMode())) {
+            combat.setCombatMode("melee", "stance button");
+        }
+        switch (stance.toLowerCase()) {
+            case "follow" -> {
+                handleStopTask();
+                following = true;
+                staying = false;
+                state.put("mode", "follow");
+                plugin.log("Laya: follow from the companion menu");
+                combat.setStance("follow", "menu");
+                combat.requestCancel();
+            }
+            case "stay" -> {
+                handleStopTask();
+                following = false;
+                staying = true;
+                pendingStayClear = true;
+                state.put("mode", "stay");
+                plugin.log("Laya: stay from the companion menu");
+                combat.setStance("stay", "menu");
+                combat.requestCancel();
+            }
+            case "attack" -> {
+                following = true;
+                staying = false;
+                state.put("mode", "attack");
+                plugin.log("Laya: attack from the companion menu");
+                combat.setStance("attack", "explicit");
+            }
+            case "defend" -> {
+                following = true;
+                staying = false;
+                state.put("mode", "defend");
+                plugin.log("Laya: defend from the companion menu");
+                combat.setStance("defend", "explicit");
+                combat.requestCancel();
+            }
+            default -> {
+            }
+        }
+    }
+
     /** True while the revive channel runs (HUD countdown). */
     public boolean hudChanneling() {
         return combat.hudChanneling();
@@ -1306,6 +1388,7 @@ public class NPCController {
         state.put("mode", "idle");
         loadCompanionName();   // Task 3: correct name on a cold start, with no bridge
         loadHudEnabled();      // Task 3: the show/hide choice, before the join gate reads it
+        loadCombatMode();      // 0.4.4: the melee/ranged/magic choice survives a restart
         plugin.log("NPC controller initialized.");
     }
 
@@ -1343,6 +1426,7 @@ public class NPCController {
     public void stop() {
         running = false;
         following = false;
+        clearMapSnapshot();
         saveInventory();   // Cycle 6: persist her pack before the world goes away
         combat.saveState();   // Task 7: persist hp/downed before the world goes away
         scheduler.shutdownNow();
@@ -1642,13 +1726,48 @@ public class NPCController {
         }
     }
 
+    /** 0.4.4: read {"mode": "melee|ranged|magic"} into the combat controller. */
+    private void loadCombatMode() {
+        try {
+            java.nio.file.Path p = Paths.get(COMBAT_JSON);
+            if (!Files.exists(p)) {
+                plugin.log("Laya: no saved combat mode yet (" + COMBAT_JSON + ")");
+                return;
+            }
+            String raw = Files.readString(p, StandardCharsets.UTF_8);
+            JsonObject root = JsonParser.parseString(raw).getAsJsonObject();
+            if (root.has("mode")) {
+                String mode = root.get("mode").getAsString();
+                combat.setCombatMode(mode, "saved");
+                plugin.log("Laya: combat mode restored (" + combat.getCombatMode()
+                    + " from " + COMBAT_JSON + ")");
+            }
+        } catch (Throwable t) {
+            plugin.log("Laya: combat mode restore failed: " + t);
+        }
+    }
+
+    /** 0.4.4: persist the chosen combat mode. Called from CombatController.setCombatMode. */
+    public void onCombatModeChanged(String mode) {
+        try {
+            JsonObject root = new JsonObject();
+            root.addProperty("mode", mode);
+            java.nio.file.Path p = Paths.get(COMBAT_JSON);
+            if (p.getParent() != null) Files.createDirectories(p.getParent());
+            Files.write(p, root.toString().getBytes(StandardCharsets.UTF_8));
+        } catch (Throwable t) {
+            plugin.log("Laya: combat mode save failed: " + t);
+        }
+    }
+
     /** One startup line naming the config files actually in use (path mix-ups are invisible otherwise). */
     public static String configPathsSummary() {
         return "blocks=" + BLOCKS_JSON
             + " state=" + STATE_JSON
             + " skin=" + Appearance.skinPath()
             + " name=" + NAME_JSON
-            + " hud=" + HUD_JSON;
+            + " hud=" + HUD_JSON
+            + " combat=" + COMBAT_JSON;
     }
 
     /**
@@ -2421,13 +2540,26 @@ public class NPCController {
      */
     private void startFollowTick() {
         scheduler.scheduleWithFixedDelay(() -> {
-            if (!running || layaRef == null || world == null || playerRef == null) return;
+            if (!running || world == null || playerRef == null) return;
+            if (layaRef == null) {
+                // 0.4.4: self-heal. If she died or the entity vanished (the engine removed
+                // her once with no damage event reaching our filter), bring her back near
+                // the player instead of waiting for a /tp that refuses while unspawned.
+                long nowMs = System.currentTimeMillis();
+                if (nowMs >= nextRespawnMs) {
+                    nextRespawnMs = nowMs + 5000;
+                    plugin.log("Laya: missing - respawning beside the player");
+                    ensureSpawned(playerRef);
+                }
+                return;
+            }
             try {
                 world.execute(() -> {
                     try {
                         if (layaRef != null && !layaRef.isValid()) {
                             plugin.log("Laya: entity ref invalid — clearing controller ref");
                             layaRef = null;
+                            clearMapSnapshot();
                             return;
                         }
                         Ref<EntityStore> playerRefNow = playerRef.getReference();
@@ -2616,9 +2748,9 @@ public class NPCController {
                         // Bridge "thinking" dots over her head while a slow turn runs.
                         tickThinking(now);
 
-                        // 0.4.3: put her on the map once per world. The provider reads
-                        // her live position and name, so the marker follows and renames.
-                        if (!mapMarkerRegistered) registerMapMarker();
+                        // 0.4.4: publish her position for the map provider. Runs here on
+                        // the world thread, so the provider can stay store-free.
+                        updateMapSnapshot(l.x, l.y, l.z);
 
                         // Diagnostic (fix cycle 2/3): one line per 5 s so the plugin log proves
                         // the settled stand-off and whether the head is actually offset from the
