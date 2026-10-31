@@ -57,7 +57,7 @@ words and she works out how to do it, then tells you what actually happened.
 ## Requirements
 
 - Windows 10 or 11
-- Hytale 0.7.x (built and tested on **0.7.4**)
+- Hytale 0.7.x (built and tested on **0.7.4** and **0.7.5**)
 - Python 3.11
 - A GPU laya.cpp can use: Vulkan (NVIDIA, AMD, Intel), or CUDA 12/13 on NVIDIA. The
   installer fetches the engine and checkpoint.

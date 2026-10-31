@@ -13,7 +13,7 @@
 </p>
 
 <p align="center">
-  <strong>Tested on Hytale 0.7.4.</strong>
+  <strong>Tested on Hytale 0.7.4 and 0.7.5.</strong>
 </p>
 
 ## What's new in 0.4.5
