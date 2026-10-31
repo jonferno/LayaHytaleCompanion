@@ -1,3 +1,5 @@
+![Laya Hytale Companion](https://raw.githubusercontent.com/jonferno/LayaHytaleCompanion/main/assets/banner.jpg)
+
 # Laya: a Hytale companion with a brain
 
 **She follows, talks, remembers, farms, harvests, mines and fights beside you.**
