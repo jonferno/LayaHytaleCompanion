@@ -16,6 +16,25 @@
   <strong>Tested on Hytale 0.7.4.</strong>
 </p>
 
+## What's new in 0.4.5
+
+- **Every weapon has its own ability.** Dagger Quick Stab (x1.8, and daggers swing every
+  0.7 s), sword Power Strike, longsword Heavy Slash, axe Cleave (hits up to two more enemies),
+  battleaxe Whirlwind, mace Crushing Blow, spear Thrust with longer reach, fists Jab. Each has
+  its own cooldown, then she swings normally until it is ready again.
+- **Abilities look and sound different.** Each plays an alternate move from the weapon's own
+  animation set, fires three stacked particle bursts on the target, and plays a hit sound
+  matched to the weapon. Burst colour follows the metal: thorium green, cobalt blue,
+  adamantite red, mithril violet, frost cyan, flame orange.
+- **Defend got real.** The shield sits in her offhand beside a one-handed weapon, halves
+  incoming damage while it is up, and is re-asserted so it does not disappear mid-fight.
+- **Menu polish.** Her pack gained eight slots (36 storage), both packs are five rows of nine
+  and line up, Stack & Sort fills two cells at the end, the stance row is centred under the
+  page, mana is HUD-only, and display text uses the game's Lexend face.
+- **Fixes.** Shield Bash takes its animation and sound from the shield instead of the sword,
+  the mace ability swings sideways instead of repeating its overhead hit, and adamantite no
+  longer reads as teal.
+
 ## What's new in 0.4.4
 
 - **She is on the map.** Her marker follows her across chunks, uses her current name, and
@@ -57,21 +76,6 @@
 - **Fixes.** Attack orders send the creature name ("kill that rabbit" now targets the
   rabbit), task reports count only the requested block and separate stone from ore, and
   stopped tasks get a personality line instead of the same sentence every time.
-
-## What's new in 0.4.2
-
-- **Downed bodies stop drawing aggro.** Enemies that were fighting her drop her the
-  moment she goes down and keep ignoring her body, so no more free kills on a corpse.
-- **Wood is wood.** "Chop this tree" always counts as a felling order and shows the
-  axe on the HUD, whatever wording reaches the model.
-- **She reports her haul.** After wood, mining, gathering, farming or harvesting she
-  says what she got, the total in her pack, and a short line in her current
-  personality, instead of the same sentence every time.
-- **Faster turns when a provider is slow.** A provider that answers in 6 seconds or
-  more is skipped for two minutes, so a fast one takes the next replies.
-- **Cleaner installs.** Each folder's launcher now points config at itself, so names,
-  HUD settings and saves no longer leak between installs. Attack acknowledgements
-  also know which creature you named.
 
 ## Why is she called Laya?
 

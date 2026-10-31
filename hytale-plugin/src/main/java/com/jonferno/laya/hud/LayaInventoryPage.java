@@ -54,17 +54,17 @@ public final class LayaInventoryPage extends InteractiveCustomUIPage<LayaInvento
                 controller.uiQuantity(100 + i));
             bind(events, "#Player" + i, 100 + i);
         }
-        for (int i = 0; i < 35; i++) {
+        for (int i = 0; i < 43; i++) {
             // 0.4.4: ui index 0 is the dedicated weapon slot in the equipped column,
-            // so the pack grid starts at 1 and does not duplicate it.
+            // so the pack grid (36 storage + 7 hotbar) starts at 1.
             setSlot(b, "#Pack" + i + "Icon", controller.uiItemId(i + 1),
                 controller.uiQuantity(i + 1));
             bind(events, "#Pack" + i, i + 1);
         }
         for (int i = 0; i < 5; i++) {
-            setSlot(b, "#Gear" + i + "Icon", controller.uiItemId(36 + i),
-                controller.uiQuantity(36 + i));
-            bind(events, "#Gear" + i, 36 + i);
+            setSlot(b, "#Gear" + i + "Icon", controller.uiItemId(44 + i),
+                controller.uiQuantity(44 + i));
+            bind(events, "#Gear" + i, 44 + i);
         }
         setSlot(b, "#GearWeaponIcon", controller.uiItemId(0), controller.uiQuantity(0));
         bind(events, "#GearWeapon", 0);
@@ -95,8 +95,7 @@ public final class LayaInventoryPage extends InteractiveCustomUIPage<LayaInvento
     private String statusLine() {
         CombatController c = controller.getCombat();
         return "Stance: " + c.getStance()
-            + "     Mode: " + c.getCombatMode()
-            + "     Mana: " + Math.round(c.magicPercent() * 100) + "%";
+            + "     Mode: " + c.getCombatMode();
     }
 
     @Override
@@ -124,7 +123,7 @@ public final class LayaInventoryPage extends InteractiveCustomUIPage<LayaInvento
         } catch (Exception e) {
             return;
         }
-        if (!((idx >= 0 && idx <= 40) || (idx >= 100 && idx <= 144))) return;
+        if (!((idx >= 0 && idx <= 48) || (idx >= 100 && idx <= 144))) return;
         if ("quick".equals(data.action)) {
             controller.quickTransfer(idx);
             selected = -1;
@@ -185,3 +184,4 @@ public final class LayaInventoryPage extends InteractiveCustomUIPage<LayaInvento
         public String value;
     }
 }
+

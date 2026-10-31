@@ -142,6 +142,13 @@ public class LayaDamageFilter extends DamageEventSystem {
                     LayaPlugin.log("Combat: friendly projectile cancelled");
                     return;
                 }
+                // 0.4.4: a shield in the offhand while defending halves the hit.
+                if (amount > 0f && controller.isShieldBlocking()) {
+                    float reduced = amount * 0.5f;
+                    damage.setAmount(reduced);
+                    LayaPlugin.log("Combat: shield block " + trim(amount) + " -> " + trim(reduced));
+                    amount = reduced;
+                }
                 // (f) lethal hit: cancel it and let Task 7 own the downed state machine.
                 float hp = controller.getLayaHp();
                 if (hp > 0f && amount >= hp) {

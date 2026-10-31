@@ -139,17 +139,17 @@ public class NPCController {
      * the slot-distance watchdog never fired and she stood there for 30 s.
      */
     private static final double FOLLOW_CATCHUP_DISTANCE = 6.0;
-    private static final long TICK_MS = 333;               // 3 slot writes/sec — Java decides *where*
+    private static final long TICK_MS = 333;               // 3 slot writes/sec â€” Java decides *where*
     private static final long STUCK_MS = 3000;             // ~60 engine ticks with no progress -> watchdog
     private static final double STUCK_EPSILON = 0.1;       // movement below this counts as "no progress"
-    private static final double STUCK_MIN_SLOT_DISTANCE = 2.0; // intent only beyond StopDistance(1.5)+margin — otherwise she's "at position"
+    private static final double STUCK_MIN_SLOT_DISTANCE = 2.0; // intent only beyond StopDistance(1.5)+margin â€” otherwise she's "at position"
     private static final double SLOT_REWRITE_MOVE = 0.25;  // ignore path refresh when slot moves less than this
     // --- Task (mine/gather) tuning ---
     private static final double TASK_ADJACENT = 1.6;   // matches the role's act-block ReadPosition Range
     private static final long TASK_IDLE_MS = 600_000;  // 10 min with no re-target AND no adjacency => abandoned
     private static final double RANGE_EPSILON = 1e-6;  // R-T4-1: tolerance when matching compiled sensor Range
     // Sentinel slot value equals the engine's "cleared" convention: sensor Range filter
-    // can never match ±1e308, so ReadPosition goes idle and the role falls back to Nothing.
+    // can never match Â±1e308, so ReadPosition goes idle and the role falls back to Nothing.
     static final Vector3d CLEARED_POSITION =
         new Vector3d(-Double.MAX_VALUE, -Double.MAX_VALUE, -Double.MAX_VALUE);
 
@@ -272,7 +272,7 @@ public class NPCController {
     private static final int TASK_MAX_HITS = 12;              // bounded hit budget; honest failure after this
     private static final int TASK_MAX_DIGS = 6;               // Cycle 6: how far she may dig down toward a buried ore
     private static final String PICKAXE_ID_TOKEN = "Tool_Pickaxe"; // item-id substring proving a pickaxe
-    // Cycle 8: chopping needs an axe — Hytale's hatchet, or a weapon axe.
+    // Cycle 8: chopping needs an axe â€” Hytale's hatchet, or a weapon axe.
     private static final String[] AXE_ID_TOKENS =
         {"Tool_Hatchet", "Tool_Axe", "Weapon_Axe", "Weapon_Battleaxe"};
     private static final Set<String> AXE_HINTS =
@@ -353,7 +353,7 @@ public class NPCController {
     private Field storedPositionsField;
     private Field instructionListField;
     private Field sensorSlotField;
-    private Field sensorRangeField;   // R-T4-1: SensorReadPosition.range (double) — the slot discriminator
+    private Field sensorRangeField;   // R-T4-1: SensorReadPosition.range (double) â€” the slot discriminator
     // Phase 1 (Forest Hue port): attack id -> compiled Target slot, filled at bind time.
     private Field sensorTargetSlotField;   // SensorTarget.targetSlot (int)
     private Field actionListField;         // Instruction.actions (ActionList)
@@ -390,17 +390,17 @@ public class NPCController {
     private boolean taskFelled = false;
     private boolean slotReadbackLogged = false;
     private boolean taskReadbackLogged = false;   // distinct latch for "Task slot readback"
-    // World-thread: one "Task active — leash deferred" line per defer episode
+    // World-thread: one "Task active â€” leash deferred" line per defer episode
     // (re-armed by the follow-ring path / clearTask, never mid-episode).
     private boolean leashDeferredLogged = false;
 
     // Active-target bookkeeping (world-thread only): the stuck watchdog must
-    // fire only when a real follow point is written — gating on the stance
+    // fire only when a real follow point is written â€” gating on the stance
     // flag alone caused the Phase-1 teleport loop when binding failed.
     boolean activeTarget = false;
     private int stuckResets = 0;
     private boolean stuckGaveUp = false;
-    // Task interface: millis of the last task-driven slot write (0 = no task has run) — gates the idle shuffle.
+    // Task interface: millis of the last task-driven slot write (0 = no task has run) â€” gates the idle shuffle.
     // volatile: written by applyCommand (bridge HTTP thread), read on the world thread.
     private volatile long lastTaskWriteMs = 0;
 
@@ -472,7 +472,7 @@ public class NPCController {
     // taskPhase is one of "IDLE"|"WALKING"|"WORKING"|"DONE" (enum-free strings per brief).
     private String taskPhase = "IDLE";
     private long phaseSinceMs = 0;            // when the current phase was entered
-    // Dedicated latch for the timed break chain — SEPARATE from the probe's
+    // Dedicated latch for the timed break chain â€” SEPARATE from the probe's
     // probeChainActive so a probe and a task can never wedge each other. One hit/verify
     // at a time; released by every terminal path (block gone / budget exhausted / abort).
     private final AtomicBoolean taskWorking = new AtomicBoolean(false);
@@ -487,7 +487,7 @@ public class NPCController {
     private String taskBlockKey = null;       // engine asset key of the target
     private int taskBlockId = 0;              // scanned block id (before-id seed)
     // CHAIN SNAPSHOT (I-2): frozen ONCE at WALKING entry, the same place taskChainGen is
-    // bumped. The break chain reads ONLY these fields — never the pending fields above — so
+    // bumped. The break chain reads ONLY these fields â€” never the pending fields above â€” so
     // a runScan that overwrites taskKind/taskLabel/taskBlockId mid-chain cannot
     // cross-contaminate an in-flight chain's interaction id / label / block id.
     private String taskSnapIid = null;        // interaction id (mine = Block_Damage, gather = destroy)
@@ -549,7 +549,7 @@ public class NPCController {
     /** Player-model thinking emote (Cosmetics EmotesInGame); dots still work without it. */
     private static final String THINKING_EMOTE = "PonderDismissive";
 
-    // Stance state. NOTE: the scheduler tick itself is never gated by these —
+    // Stance state. NOTE: the scheduler tick itself is never gated by these â€”
     // a "stay" must stop WRITING the follow point, never kill the loop
     // (the pre-Phase-1 freeze bug came exactly from killing the loop).
     private volatile boolean following = false;
@@ -574,7 +574,7 @@ public class NPCController {
 
     // Follow-anchor state (world-thread only): the stand-off ring point is
     // recomputed only when the PLAYER has moved past the start buffer away from
-    // this anchor — deriving the trigger from Laya's own distance made her
+    // this anchor â€” deriving the trigger from Laya's own distance made her
     // re-target whenever SHE moved, i.e. circle the player.
     Vector3d followAnchor = null;
     private long nextIdleShuffleMs = 0;
@@ -592,7 +592,7 @@ public class NPCController {
 
     /**
      * Task 5: Laya's combat state, so {@code LayaPlugin.setup()} can register the damage
-     * filter against it. Safe to hand out from construction time — the controller is
+     * filter against it. Safe to hand out from construction time â€” the controller is
      * created as a field initialiser above, before any system can run.
      */
     public CombatController getCombat() {
@@ -715,7 +715,7 @@ public class NPCController {
     /**
      * Adds {@code x}/{@code y}/{@code z} from the player's live transform to the
      * {@code player} object. A missing component or store leaves the keys absent.
-     * World-thread read — see {@link #stateSnapshotJson} and {@link #idleSceneJson}.
+     * World-thread read â€” see {@link #stateSnapshotJson} and {@link #idleSceneJson}.
      */
     private void addPlayerPosition(JsonObject player) {
         try {
@@ -733,7 +733,7 @@ public class NPCController {
     }
 
     /**
-     * The nearest ≤{@link #NEARBY_MAX} non-Laya entities within {@link #NEARBY_RADIUS}
+     * The nearest â‰¤{@link #NEARBY_MAX} non-Laya entities within {@link #NEARBY_RADIUS}
      * of the player, as {@code [{"type":<roleName>,"distance":<rounded>}]}. Empty when
      * nothing is in range or a read fails. World-thread read.
      */
@@ -791,7 +791,7 @@ public class NPCController {
 
     /**
      * The role name of an entity, or "target" when it cannot be read. Mirrors
-     * {@code CombatController.roleOf} — the same NPCEntity.getRoleName() pattern.
+     * {@code CombatController.roleOf} â€” the same NPCEntity.getRoleName() pattern.
      */
     private String roleOf(Ref<EntityStore> ref) {
         try {
@@ -960,9 +960,9 @@ public class NPCController {
         Inventory inv = npcEntity.getInventory();
         if (inv == null) return null;
         if (idx < 8) return inv.getHotbar();       // 0 = dedicated weapon slot, 1..7 pack
-        if (idx < 36) return inv.getStorage();
-        if (idx < 40) return inv.getArmor();
-        if (idx == 40) return inv.getUtility();
+        if (idx < 44) return inv.getStorage();     // 36 storage slots (8 more since 0.4.4)
+        if (idx < 48) return inv.getArmor();
+        if (idx == 48) return inv.getUtility();
         return null;
     }
 
@@ -972,8 +972,8 @@ public class NPCController {
             return (short) (j < 9 ? j : j - 9);
         }
         if (idx < 8) return (short) idx;            // weapon slot is hotbar 0
-        if (idx < 36) return (short) (idx - 8);
-        if (idx < 40) return (short) (idx - 36);
+        if (idx < 44) return (short) (idx - 8);
+        if (idx < 48) return (short) (idx - 44);
         return 0;
     }
 
@@ -1050,8 +1050,8 @@ public class NPCController {
 
     /** Move/swap a UI slot stack. Armor slots only accept their matching piece. */
     public boolean moveUiItem(int from, int to) {
-        boolean fromOk = (from >= 0 && from <= 40) || (from >= 100 && from <= 144);
-        boolean toOk = (to >= 0 && to <= 40) || (to >= 100 && to <= 144);
+        boolean fromOk = (from >= 0 && from <= 48) || (from >= 100 && from <= 144);
+        boolean toOk = (to >= 0 && to <= 48) || (to >= 100 && to <= 144);
         if (from == to || !fromOk || !toOk) return false;
         try {
             ItemContainer sc = uiContainer(from);
@@ -1676,7 +1676,7 @@ public class NPCController {
 
     /**
      * Record the player's show/hide choice and persist it. The HUD itself is applied
-     * by the caller (the command, on the world thread) — this only owns the flag and
+     * by the caller (the command, on the world thread) â€” this only owns the flag and
      * {@link #HUD_JSON}, so a repeat {@code off} still persists.
      */
     public void setHudEnabled(boolean on) {
@@ -2015,7 +2015,7 @@ public class NPCController {
         return sb.toString();
     }
 
-    /** Cache the world reference — captured from AddPlayerToWorldEvent. */
+    /** Cache the world reference â€” captured from AddPlayerToWorldEvent. */
     public void captureWorld(World w) {
         if (world == null && w != null) {
             world = w;
@@ -2025,13 +2025,13 @@ public class NPCController {
 
     /**
      * Spawn Laya near the player if not already spawned. Safe to call
-     * repeatedly — idempotent. On success the follow slot is bound immediately
+     * repeatedly â€” idempotent. On success the follow slot is bound immediately
      * and an initial follow point is written (bootstrap).
      */
     public void ensureSpawned(PlayerRef player) {
         if (layaRef != null || player == null) return;
         if (world == null) {
-            plugin.log("Cannot spawn Laya yet — world not captured.");
+            plugin.log("Cannot spawn Laya yet â€” world not captured.");
             return;
         }
         playerRef = player;
@@ -2057,7 +2057,7 @@ public class NPCController {
                     if (result != null && result.first() != null) {
                         layaRef = result.first();
                         // Task 5: the break driver is entity-scoped (InteractionManager +
-                        // InteractionContext owner) — bind Laya as the acting entity.
+                        // InteractionContext owner) â€” bind Laya as the acting entity.
                         BlockBreaker.bindActor(layaRef);
                         layaEntityId = "laya_npc_" + System.currentTimeMillis();
                         if (result.second() instanceof NPCEntity npc) {
@@ -2105,7 +2105,7 @@ public class NPCController {
      *    the protected Vector3d[] storedPositions array has no public setter,
      *    hence one reflective field write.
      *  - getSlotName() only reverses TARGET-slot names (targetSlotMapper) and
-     *    null-PEs when the role declares none — position slots are a separate
+     *    null-PEs when the role declares none â€” position slots are a separate
      *    build-time namespace. The authoritative index therefore comes from
      *    the engine-compiled ReadPosition sensor node itself.
      * World-thread only.
@@ -2115,7 +2115,7 @@ public class NPCController {
         try {
             markedSupport = MarkedEntitySupport.get(npc.getReference(), worldStore);
             if (markedSupport == null) {
-                plugin.log("bindFollowSlot: MarkedEntitySupport missing — engine seek follow unavailable");
+                plugin.log("bindFollowSlot: MarkedEntitySupport missing â€” engine seek follow unavailable");
                 return;
             }
             worldSupport = WorldSupport.get(npc.getReference(), worldStore);
@@ -2131,7 +2131,7 @@ public class NPCController {
                 }
             }
             if (field == null) {
-                plugin.log("bindFollowSlot: storedPositions field not found — engine seek follow unavailable");
+                plugin.log("bindFollowSlot: storedPositions field not found â€” engine seek follow unavailable");
                 return;
             }
             field.setAccessible(true);
@@ -2153,7 +2153,7 @@ public class NPCController {
             // R-T4-1: collect EVERY ReadPosition node's (range, slot) pair. The task
             // blocks are inserted BEFORE the follow block in Laya.json, so the legacy
             // "first ReadPosition node wins" scan can no longer identify the follow
-            // slot — the compiled Range is the discriminator (follow=40, task act=1.6,
+            // slot â€” the compiled Range is the discriminator (follow=40, task act=1.6,
             // task walk=120; all three distinct in this role).
             List<double[]> usages = new ArrayList<>();
             collectPositionUsages(root, usages);
@@ -2175,11 +2175,11 @@ public class NPCController {
                 plugin.log("Follow slot '" + FOLLOW_SLOT + "' bound at index 0 of 1 (single-slot fallback for role '" + model + "')");
             } else {
                 plugin.log("FAILED to resolve follow slot '" + FOLLOW_SLOT + "' (array=" + count
-                    + ", sensor idx=" + idx + ") — engine seek follow disabled");
+                    + ", sensor idx=" + idx + ") â€” engine seek follow disabled");
             }
 
             // R-T4-1: bind the task slot by the SAME range walk. Never throws into the
-            // follow binding — on any mismatch the task writes are disabled (taskSlot=-1)
+            // follow binding â€” on any mismatch the task writes are disabled (taskSlot=-1)
             // and the follow slot keeps working.
             bindTaskSlot(usages, count);
 
@@ -2304,7 +2304,7 @@ public class NPCController {
         }
     }
 
-    /** R-T4-1: the slot index of the usage whose compiled Range equals {@code range} (±1e-6), or -1. */
+    /** R-T4-1: the slot index of the usage whose compiled Range equals {@code range} (Â±1e-6), or -1. */
     private static int findSlotByRange(List<double[]> usages, double range) {
         for (double[] u : usages) {
             if (Math.abs(u[0] - range) < RANGE_EPSILON) {
@@ -2318,7 +2318,7 @@ public class NPCController {
      * R-T4-1 (binding ruling): bind the task position slot from the SAME compiled-range
      * walk. The two task blocks MUST claim the same auto-registered slot
      * ("TaskTargetPosition" declared twice in Laya.json): act Range 1.6 and walk
-     * Range 120. Any mismatch disables task writes only — the follow binding above
+     * Range 120. Any mismatch disables task writes only â€” the follow binding above
      * has already been resolved and is never touched.
      */
     private void bindTaskSlot(List<double[]> usages, int count) {
@@ -2349,12 +2349,12 @@ public class NPCController {
             } else {
                 taskSlot = -1;
                 plugin.log("FAILED task slot binding (follow=" + followIdx + " task=" + actIdx
-                    + " ranges=" + ranges + ") — task writes disabled");
+                    + " ranges=" + ranges + ") â€” task writes disabled");
             }
         } catch (Throwable t) {
             taskSlot = -1;
             plugin.log("FAILED task slot binding (follow=" + followIdx + " task=" + actIdx
-                + " ranges=" + ranges + ") — task writes disabled (" + t + ")");
+                + " ranges=" + ranges + ") â€” task writes disabled (" + t + ")");
         }
     }
 
@@ -2406,7 +2406,7 @@ public class NPCController {
      * <p>The engine's Watch is a head-only motion, and the Player model declares a Camera
      * block without any yaw range, so {@code MotionControllerBase.calculateYaw} clamps the
      * head to the default +/-45 deg. Inside the follow ring's StopDistance the Seek force
-     * clears its steering, so nothing claims the body yaw either — she keeps staring along
+     * clears its steering, so nothing claims the body yaw either â€” she keeps staring along
      * her last heading ("looking forward"). Writing the transform yaw is exactly what
      * {@code MotionControllerBase.moveEntity} does, and {@code readEntityPosition} adopts
      * the transform on the next tick, so the change survives the controller's own write.
@@ -2461,8 +2461,8 @@ public class NPCController {
     /**
      * End the current task (world-thread only): sentinel the task slot so the
      * role's two task blocks stop claiming, re-arm the follow ring, drop adjacency,
-     * reset the task timestamps, and — ONLY when {@code reason} starts with
-     * {@code task_failed} — post a {@code task_failed} event.
+     * reset the task timestamps, and â€” ONLY when {@code reason} starts with
+     * {@code task_failed} â€” post a {@code task_failed} event.
      *
      * R-T4-2 (cross-task coupling, binding): Task 1 gates the idle shuffle on
      * {@code lastTaskWriteMs == 0}. Task writes stamp this field non-zero, so if
@@ -2557,7 +2557,7 @@ public class NPCController {
                 world.execute(() -> {
                     try {
                         if (layaRef != null && !layaRef.isValid()) {
-                            plugin.log("Laya: entity ref invalid — clearing controller ref");
+                            plugin.log("Laya: entity ref invalid â€” clearing controller ref");
                             layaRef = null;
                             clearMapSnapshot();
                             return;
@@ -2575,7 +2575,7 @@ public class NPCController {
                         long now = System.currentTimeMillis();
 
                         // Task 2: retire an expired probe window (exactly one log per
-                        // arm — both fields are cleared here, and the "live" test in
+                        // arm â€” both fields are cleared here, and the "live" test in
                         // pollInteractKey requires probeUntilMs != 0).
                         if (probeUntilMs != 0 && now >= probeUntilMs) {
                             probeStartMs = 0;
@@ -2584,7 +2584,7 @@ public class NPCController {
                         }
 
                         // Cycle 7: keep her interactable + consume the engine's
-                        // Use (default interact key) — PlayerInteractEvent is never
+                        // Use (default interact key) â€” PlayerInteractEvent is never
                         // fired by 0.7.2, so the engine's own interaction queue is
                         // the only reliable signal.
                         pollInteractKey(playerRefNow);
@@ -2609,10 +2609,10 @@ public class NPCController {
                                 activeTarget = false;
                                 stuckResets = 0;
                                 stuckGaveUp = false;
-                                // Task 3: this is the "stay anchor" — the spot she holds until
+                                // Task 3: this is the "stay anchor" â€” the spot she holds until
                                 // a fight takes movement and hands her back here on release.
                                 combat.noteStayAnchor(new Vector3d(l));
-                                plugin.log("Follow target cleared — engine holds her in place");
+                                plugin.log("Follow target cleared â€” engine holds her in place");
                             }
                         }
 
@@ -2623,7 +2623,7 @@ public class NPCController {
                         if (taskTarget != null) {
                             pendingTaskTarget = null;
                             if (taskSlot < 0) {
-                                plugin.log("Task target ignored — task slot not bound (index " + taskSlot + ")");
+                                plugin.log("Task target ignored â€” task slot not bound (index " + taskSlot + ")");
                             } else {
                                 String[] parts = taskTarget.split(",");
                                 double tx = Double.parseDouble(parts[0]);
@@ -2644,7 +2644,7 @@ public class NPCController {
                                     stuckGaveUp = false;
                                     // Task 6: enter WALKING. Bump the chain GENERATION FIRST
                                     // (I-1), then freeze the CHAIN SNAPSHOT (I-2) from the
-                                    // pending runScan metadata — so any in-flight chain from a
+                                    // pending runScan metadata â€” so any in-flight chain from a
                                     // previous task is invalidated before its inputs can change,
                                     // and the new chain reads only frozen values.
                                     taskChainGen++;
@@ -2674,7 +2674,7 @@ public class NPCController {
                                         taskReadbackLogged = true;
                                         Vector3d rb = readSlot(taskSlot);
                                         plugin.log("Task slot readback (index " + taskSlot + "): "
-                                            + (rb == null ? "NULL — element missing!" : rb.toString()));
+                                            + (rb == null ? "NULL â€” element missing!" : rb.toString()));
                                     }
                                 }
                                 plugin.log("Task target set to (" + tx + ", " + tz + ") engine walk: " + ok);
@@ -2709,7 +2709,7 @@ public class NPCController {
 
                         // Task 3: combat heartbeat runs every tick, immediately after the
                         // distances are known. While combat owns movement (or she is downed)
-                        // the follow ring, idle face and the two watchdogs stand down — the
+                        // the follow ring, idle face and the two watchdogs stand down â€” the
                         // `motionLocked` gates below. Task target/phase and move_to stay
                         // UNGATED: combat cancels a live task at engage, and a move_to
                         // command issued during a fight deliberately wins.
@@ -2731,7 +2731,7 @@ public class NPCController {
                         } catch (Throwable ignored) {
                         }
 
-                        // R-T4-1: a live task owns movement — the follow ring must not
+                        // R-T4-1: a live task owns movement â€” the follow ring must not
                         // write (lastTaskWriteMs is stamped on every task write and kept
                         // fresh while she is adjacent to the task point, below).
                         boolean taskLive = lastTaskWriteMs != 0 && now - lastTaskWriteMs < TASK_IDLE_MS;
@@ -2791,7 +2791,7 @@ public class NPCController {
                         // her re-target every tick she moved and circle the player.
                         if (following && pendingMoveTo == null && !taskLive && !motionLocked) {
                             // fix (c): this block is reached exactly when no task is live, i.e.
-                            // the leash is NOT deferring — re-arm the once-per-episode defer log.
+                            // the leash is NOT deferring â€” re-arm the once-per-episode defer log.
                             leashDeferredLogged = false;
                             boolean reanchor = followAnchor == null;
                             if (!reanchor) {
@@ -2838,7 +2838,7 @@ public class NPCController {
                                         slotReadbackLogged = true;
                                         Vector3d rb = readFollowSlot();
                                         plugin.log("Slot write readback (index " + followSlot + "): "
-                                            + (rb == null ? "NULL — element missing!" : rb.toString()));
+                                            + (rb == null ? "NULL â€” element missing!" : rb.toString()));
                                     }
                                 }
                             }
@@ -2880,16 +2880,16 @@ public class NPCController {
                             }
                         }
 
-                        // --- watchdog 1: leash teleport (>25 blocks, follow stance only — a "stay" must never be leashed) ---
+                        // --- watchdog 1: leash teleport (>25 blocks, follow stance only â€” a "stay" must never be leashed) ---
                         if (following && dist > LEASH_TELEPORT_DISTANCE && !motionLocked) {
                             if (taskLive) {
                                 // Task ownership replaces follow: she may legitimately be far
                                 // from the player while walking to the block. Log once per
-                                // defer episode (fix c). R-T4-4: defer falls through —
+                                // defer episode (fix c). R-T4-4: defer falls through â€”
                                 // task phases must heartbeat/abandon, so NO return here.
                                 if (!leashDeferredLogged) {
                                     leashDeferredLogged = true;
-                                    plugin.log("Task active — leash deferred");
+                                    plugin.log("Task active â€” leash deferred");
                                 }
                             } else {
                                 leashDeferredLogged = false;   // fix (c): non-defer path ran
@@ -2907,7 +2907,7 @@ public class NPCController {
 
                         // --- task ownership: adjacency heartbeat + abandonment (R-T4-1) ---
                         // The task slot holds the block we were sent to. While Laya is
-                        // within TASK_ADJACENT we refresh the timer — ONLY then. Mere
+                        // within TASK_ADJACENT we refresh the timer â€” ONLY then. Mere
                         // liveness must NOT refresh it, otherwise a task abandoned
                         // halfway (she never arrives, never re-targeted) would never
                         // time out. 10 minutes of neither adjacency nor a re-target
@@ -2915,7 +2915,7 @@ public class NPCController {
                         if (taskSlot >= 0) {
                             Vector3d taskPoint = readSlot(taskSlot);
                             // Only a LIVE task (a task write has happened and not been
-                            // cleared) may heartbeat — an unwritten slot must never look
+                            // cleared) may heartbeat â€” an unwritten slot must never look
                             // "adjacent" and suppress the follow ring.
                             boolean taskLiveNow = lastTaskWriteMs != 0;
                             if (taskLiveNow && taskPoint != null && Math.abs(taskPoint.x) < 1e6) {
@@ -3142,7 +3142,7 @@ public class NPCController {
                                     + String.format("%.1f", slotDist) + ")");
                                 if (stuckResets >= 2) {
                                     stuckGaveUp = true;
-                                    plugin.log("Stuck watchdog: 2 resets without movement — suspect engine Seek not driving her"
+                                    plugin.log("Stuck watchdog: 2 resets without movement â€” suspect engine Seek not driving her"
                                         + " (bind log line above has the slot index); staying quiet, slot writes continue");
                                 }
                                 lastProgressMs = now;
@@ -3204,7 +3204,7 @@ public class NPCController {
 
     /**
      * Task 7 gift entry (bridge HTTP thread). Readiness check here, then the whole
-     * transfer is handed to the world thread — the same shape as
+     * transfer is handed to the world thread â€” the same shape as
      * {@link #teleportLayaToPlayer()}. No target fields: the gift is whatever the
      * PLAYER is holding right now.
      *
@@ -3214,7 +3214,7 @@ public class NPCController {
      */
     private void handleGiftHand() {
         if (world == null || worldStore == null || playerRef == null || layaRef == null) {
-            plugin.log("Gift ignored — not ready (world=" + (world != null)
+            plugin.log("Gift ignored â€” not ready (world=" + (world != null)
                 + ", store=" + (worldStore != null) + ", player=" + (playerRef != null)
                 + ", laya=" + (layaRef != null) + ")");
             return;
@@ -3233,7 +3233,7 @@ public class NPCController {
      *       {@code PlayerSystems$PlayerInitSystem.onEntityAdded} and
      *       {@code NPCSystems$OnNPCAdded.onEntityAdded} both call
      *       {@code Inventory.backwardsCompatHook(Holder)}, which copies the section
-     *       components into the legacy {@code Inventory} fields — so these containers are
+     *       components into the legacy {@code Inventory} fields â€” so these containers are
      *       the SAME objects the entity really uses (not a shadow copy).</li>
      *   <li>Held slot: {@code Inventory.getItemInHand()} returns the TOOLS item while
      *       {@code usingToolsItem()} is true, otherwise the active hotbar item. This method
@@ -3244,12 +3244,12 @@ public class NPCController {
      *       writeAction that removes from the source slot and adds to the destination,
      *       returning BOTH sides in one transaction. Its bytecode
      *       ({@code lambda$internal_moveItemStackFromSlot$3}) puts any add-remainder BACK
-     *       into the source slot, so a full destination cannot destroy the item — no dupe
+     *       into the source slot, so a full destination cannot destroy the item â€” no dupe
      *       (unlike add-first) and no silent loss (unlike remove-first). This is the paired
      *       operation the Task 7 brief prefers.</li>
      * </ul>
      *
-     * <p>Truthfulness (RF4): the "gifted" count is never assumed — it is derived from what
+     * <p>Truthfulness (RF4): the "gifted" count is never assumed â€” it is derived from what
      * the source slot actually still holds after the call. Empty hand and a destination
      * that takes nothing both log a refusal and post NO {@code gave} event.
      */
@@ -3306,12 +3306,12 @@ public class NPCController {
 
             Inventory ninv = npcEntity.getInventory();
             if (ninv == null) {
-                plugin.log("Gift: nothing moved — Laya has no inventory (" + id + " x" + qty + " stays with the player)");
+                plugin.log("Gift: nothing moved â€” Laya has no inventory (" + id + " x" + qty + " stays with the player)");
                 return;
             }
             dest = ninv.getCombinedHotbarFirst();
             if (dest == null) {
-                plugin.log("Gift: nothing moved — Laya has no inventory (" + id + " x" + qty + " stays with the player)");
+                plugin.log("Gift: nothing moved â€” Laya has no inventory (" + id + " x" + qty + " stays with the player)");
                 return;
             }
         } catch (Throwable t) {
@@ -3329,7 +3329,7 @@ public class NPCController {
             int afterQty = giftSlotQuantity(src, slot);
             if (afterQty < qty) {
                 plugin.log("Gift FAILED after removing " + id + " x" + (qty - afterQty)
-                    + " — item may be lost (" + t + ")");
+                    + " â€” item may be lost (" + t + ")");
             } else {
                 plugin.log("Gift failed, item stays in hand: " + t);
             }
@@ -3349,7 +3349,7 @@ public class NPCController {
             return;
         }
         if (moved <= 0) {
-            plugin.log("Gift: nothing moved — Laya couldn't take " + id + " x" + qty
+            plugin.log("Gift: nothing moved â€” Laya couldn't take " + id + " x" + qty
                 + " (item stays with the player)");
             return;
         }
@@ -3557,7 +3557,7 @@ public class NPCController {
 
         // Task action ("task": identify|mine|gather, optional "target_hint"): the scan
         // runs inside world.execute and reports back to the bridge as an event. Tasks
-        // are not exclusive — a task never blocks the stance lines below.
+        // are not exclusive â€” a task never blocks the stance lines below.
         // "null"/"none"/"" are the bridge's "no task" spellings (a JSON null arrives
         // here as the literal string "null" through extractJsonField).
         if (task != null && !task.isEmpty()
@@ -3601,7 +3601,7 @@ public class NPCController {
             combat.setStance("follow", "command");
             combat.requestCancel();
         } else if ("stay".equalsIgnoreCase(action)) {
-            // NOTE: stay does NOT stop the tick loop — it only clears the follow
+            // NOTE: stay does NOT stop the tick loop â€” it only clears the follow
             // point once. The loop (and watchdogs) keep running; the next
             // "follow" re-arms slot writes instantly. (Killing the loop on stay
             // was the original freeze bug.)
@@ -3621,7 +3621,7 @@ public class NPCController {
             combat.setStance("attack", "explicit");
             combat.setAttackHint(targetHint);
         } else if ("defend".equalsIgnoreCase(action)) {
-            // Task 3: guard stance — stays close, fights only reactively (spec section 2).
+            // Task 3: guard stance â€” stays close, fights only reactively (spec section 2).
             following = true;
             staying = false;
             state.put("mode", "defend");
@@ -3642,7 +3642,7 @@ public class NPCController {
             handleProbeFarm();
         } else if ("gift_hand".equalsIgnoreCase(action)) {
             // Task 7 gift: hand what the PLAYER currently holds to Laya.
-            // R-T7-1: gift_hand only — no barter UI / InteractionInstruction (deferred T13).
+            // R-T7-1: gift_hand only â€” no barter UI / InteractionInstruction (deferred T13).
             // No target fields: the gift is whatever is in the player's hand right now.
             // Readiness check runs HERE (bridge thread); the transfer runs inside
             // world.execute (world thread), mirroring teleportLayaToPlayer.
@@ -3682,7 +3682,7 @@ public class NPCController {
     /**
      * "task" branch entry point (called from the bridge HTTP thread).
      * Validates readiness, loads config/blocks.json once, then schedules the whole
-     * world scan on the world thread — the same pattern as teleportLayaToPlayer.
+     * world scan on the world thread â€” the same pattern as teleportLayaToPlayer.
      * The world-thread body logs and posts an event back to the ai-bridge.
      */
     private void handleTask(String task, String hint, int count) {
@@ -3706,12 +3706,12 @@ public class NPCController {
         final String h = chosenHint;
         final int requested = count <= 0 ? 0 : Math.min(count, 64); // 0 = all in range
         if (world == null || worldStore == null || playerRef == null) {
-            plugin.log("Task '" + t + "' ignored — not ready (world=" + (world != null)
+            plugin.log("Task '" + t + "' ignored â€” not ready (world=" + (world != null)
                 + ", player=" + (playerRef != null) + ")");
             postEvent("task_failed", t + ": not ready (no world/player yet)");
             return;
         }
-        // Task 7 (ruling 2): no new tasks while she is down — the downed state owns her.
+        // Task 7 (ruling 2): no new tasks while she is down â€” the downed state owns her.
         // No task state is touched and NO event is posted (spec: no extra events).
         if (combat.isDowned()) {
             plugin.log("Combat: task refused (downed)");
@@ -3763,12 +3763,12 @@ public class NPCController {
                     // mining needs a pickaxe in Laya's inventory; gather uses the
                     // instant-destroy interaction and needs no tool.
                     if ("mine".equals(t) && !hasPickaxe()) {
-                        plugin.log("Task mine refused — no pickaxe in Laya's inventory");
+                        plugin.log("Task mine refused â€” no pickaxe in Laya's inventory");
                         postEvent("task_failed", "I don't have a pickaxe");
                         return;
                     }
                     if (AXE_HINTS.contains(h == null ? "" : h.toLowerCase()) && !hasAxe()) {
-                        plugin.log("Task chop refused — no axe in Laya's inventory");
+                        plugin.log("Task chop refused â€” no axe in Laya's inventory");
                         postEvent("task_failed", "I don't have an axe to chop with");
                         return;
                     }
@@ -3785,11 +3785,11 @@ public class NPCController {
     }
 
     /**
-     * Task 3: combat is taking movement — cancel a live mine/gather task. Runs on the
+     * Task 3: combat is taking movement â€” cancel a live mine/gather task. Runs on the
      * WORLD thread (CombatController is ticked from {@code startFollowTick}'s
      * {@code world.execute}), so it mutates the task state directly. Unlike
      * {@link #handleStopTask()} this is a combat hand-off, not a player request: no
-     * {@code npc_event} is posted (spec: no extra chat lines) — only the cancelling
+     * {@code npc_event} is posted (spec: no extra chat lines) â€” only the cancelling
      * log line the run sheet asserts.
      */
     void cancelTaskForCombat() {
@@ -3961,7 +3961,7 @@ public class NPCController {
      * Cycle 7: 0.7.2 never fires PlayerInteractEvent (the class exists but has no
      * construction site in the server), so the default interact key is read from
      * the engine's own NPC interaction queue instead. We also keep her marked
-     * interactable for this player — the role's InteractionInstruction turned out
+     * interactable for this player â€” the role's InteractionInstruction turned out
      * not to set the component for this NPC, so the client showed no prompt.
      */
     private void pollInteractKey(Ref<EntityStore> playerEntity) {
@@ -4101,7 +4101,7 @@ public class NPCController {
         if (combat.isDowned()) {
             // Task 7: never open the inventory while she is down. The right-click is a
             // one-shot press (no repeats), so it is swallowed rather than fed to the
-            // literal-hold channel — a single press would otherwise be cancelled as
+            // literal-hold channel â€” a single press would otherwise be cancelled as
             // `release` 600 ms later and spam the cancel line. The Use route (which does
             // repeat while held) is the pickup input.
             return;
@@ -4177,7 +4177,7 @@ public class NPCController {
     }
 
     /**
-     * World-thread: mine/gather — scan {@value #SCAN_RADIUS} blocks around the player
+     * World-thread: mine/gather â€” scan {@value #SCAN_RADIUS} blocks around the player
      * for blocks whose engine asset key matches the hint's regex from blocks.json.
      * The chosen target is stashed in {@link #pendingTaskTarget} for Task 4's tick.
      */
@@ -4569,12 +4569,12 @@ public class NPCController {
     /**
      * Task 6 chain guard (I-1). A callback may act only when it still belongs to the live
      * chain generation AND that generation is the WORKING one. On a generation mismatch it
-     * logs once and returns — it must NEVER touch the latch, the phase or post an event,
+     * logs once and returns â€” it must NEVER touch the latch, the phase or post an event,
      * because the latch/phase/coords may now belong to a different (newer) chain.
      */
     private boolean taskChainCurrent(long gen) {
         if (gen != taskChainGen) {
-            plugin.log("Task chain stale (gen=" + gen + " != " + taskChainGen + ") — dropped");
+            plugin.log("Task chain stale (gen=" + gen + " != " + taskChainGen + ") â€” dropped");
             return false;
         }
         return taskWorking.get() && ("WORKING".equals(taskPhase) || "DIGGING".equals(taskPhase));
@@ -4584,16 +4584,16 @@ public class NPCController {
      * Refusal gate (world-thread, called BEFORE any task-slot write): does Laya carry a
      * pickaxe? Pinned inventory read (javap, local 0.7.2 jar):
      * <ul>
-     *   <li>{@code LivingEntity.getInventory(): Inventory} — {@code NPCEntity extends LivingEntity};</li>
+     *   <li>{@code LivingEntity.getInventory(): Inventory} â€” {@code NPCEntity extends LivingEntity};</li>
      *   <li>the six {@code Inventory} sections {@code getHotbar()/getTools()/getStorage()/
-     *       getBackpack()/getUtility()/getArmor()} → {@code ItemContainer};</li>
-     *   <li>{@code ItemContainer.countItemStacks(Predicate<ItemStack>): int} — bytecode sums
+     *       getBackpack()/getUtility()/getArmor()} â†’ {@code ItemContainer};</li>
+     *   <li>{@code ItemContainer.countItemStacks(Predicate<ItemStack>): int} â€” bytecode sums
      *       the quantities of all non-empty stacks whose predicate matches (verified in the
      *       {@code lambda$countItemStacks$0} body), so {@code > 0} is a presence check;</li>
      *   <li>the predicate tests {@code ItemStack.getItemId()} (the item asset key, e.g.
      *       {@code Tool_Pickaxe_Copper}) for the substring {@code Tool_Pickaxe}.</li>
      * </ul>
-     * Any failure (no NPC entity, no inventory, exception) returns false → the mine task is
+     * Any failure (no NPC entity, no inventory, exception) returns false â†’ the mine task is
      * truthfully refused rather than attempted.
      */
     private boolean hasPickaxe() {
@@ -4684,12 +4684,12 @@ public class NPCController {
 
     /**
      * World-thread (scheduleAfter): the only place success is decided. Success requires
-     * block-gone evidence (R-T6-0) — a non-air read, even one whose id changed, is NOT
+     * block-gone evidence (R-T6-0) â€” a non-air read, even one whose id changed, is NOT
      * success. On the bounded budget's exhaustion the task fails honestly. {@code beforeId}
      * is the same hit's own before-read (a final parameter, not a shared field).
      *
      * <p>Cycle 6: when the target sits under the ground and the hit does no damage,
-     * dig the block under her feet (bounded by {@link #TASK_MAX_DIGS}) and retry —
+     * dig the block under her feet (bounded by {@link #TASK_MAX_DIGS}) and retry â€”
      * she tunnels down to the vein instead of failing "can't break it".
      */
     private void taskVerify(long gen, String interactionId, int attempt, int x, int y, int z,
@@ -4748,7 +4748,7 @@ public class NPCController {
         if (BlockBreaker.blockId(world, dx, dy, dz) == BlockScanner.EMPTY_ID) return false;
         taskDigCount++;
         plugin.log("Task dig " + taskDigCount + "/" + TASK_MAX_DIGS + " @" + dx + "," + dy + "," + dz
-            + " — target @" + taskSnapX + "," + taskSnapY + "," + taskSnapZ + " out of reach");
+            + " â€” target @" + taskSnapX + "," + taskSnapY + "," + taskSnapZ + " out of reach");
         taskPhase = "DIGGING";
         taskWorking.set(true);
         phaseSinceMs = System.currentTimeMillis();
@@ -4761,14 +4761,14 @@ public class NPCController {
         taskWorking.set(false);
         taskPhase = "WALKING";
         phaseSinceMs = System.currentTimeMillis();
-        plugin.log("Task dig cleared — resuming target @" + taskSnapX + "," + taskSnapY + "," + taskSnapZ);
+        plugin.log("Task dig cleared â€” resuming target @" + taskSnapX + "," + taskSnapY + "," + taskSnapZ);
     }
 
     /** Block gone: enter DONE and let the role's always-on pickup run for TASK_SETTLE_MS. */
     private void enterDone() {
         taskPhase = "DONE";
         phaseSinceMs = System.currentTimeMillis();
-        plugin.log("Task DONE — block broken @" + taskSnapX + "," + taskSnapY + "," + taskSnapZ
+        plugin.log("Task DONE â€” block broken @" + taskSnapX + "," + taskSnapY + "," + taskSnapZ
             + "; settling " + TASK_SETTLE_MS + "ms for pickup");
     }
 
@@ -4777,7 +4777,7 @@ public class NPCController {
      * Count the block that just broke; if the task asked for more (N) or for
      * "all" (0), scan again for the same hint and queue the next target. The
      * tick's pending-target branch then walks her over as a NEW chain (new
-     * generation). When nothing matching is left — or N is reached — post ONE
+     * generation). When nothing matching is left â€” or N is reached â€” post ONE
      * summary event: progress is reported per task, never per block.
      */
     /**
@@ -4858,7 +4858,7 @@ public class NPCController {
                 followAnchor = null;   // player re-anchors while she walks to the next one
                 plugin.log("Task progress: " + done + "/"
                     + (requested == 0 ? "all" : String.valueOf(requested))
-                    + " " + label + " — next target queued");
+                    + " " + label + " â€” next target queued");
                 return;
             }
         }
@@ -5065,7 +5065,7 @@ public class NPCController {
      * observed in {@link #pollInteractKey} and retired in the follow tick.
      */
     private void startUseProbe() {
-        // Task 7 (step 2): the probe is rejected while she is down — a live window would
+        // Task 7 (step 2): the probe is rejected while she is down â€” a live window would
         // otherwise swallow the pickup's Use events once the downed route stops matching.
         // Silent: no new log string is introduced by Task 7 beyond the ones in the brief.
         if (combat.isDowned()) {
@@ -5087,12 +5087,12 @@ public class NPCController {
      */
     private void handleProbeBreak() {
         if (world == null || worldStore == null || layaRef == null) {
-            plugin.log("Probe S1 ignored — not ready (world=" + (world != null)
+            plugin.log("Probe S1 ignored â€” not ready (world=" + (world != null)
                 + ", store=" + (worldStore != null) + ", laya=" + (layaRef != null) + ")");
             return;
         }
         if (!probeChainActive.compareAndSet(false, true)) {
-            plugin.log("Probe S1 ignored — a probe chain is already pending");
+            plugin.log("Probe S1 ignored â€” a probe chain is already pending");
             return;
         }
         // File I/O happens on this (bridge) thread, not on the world thread.
@@ -5139,7 +5139,7 @@ public class NPCController {
 
     /**
      * World-thread: one hit. Damage is verified {@code PROBE_VERIFY_DELAY_MS} later
-     * because {@code InteractionManager.queueExecuteChain} only enqueues the chain —
+     * because {@code InteractionManager.queueExecuteChain} only enqueues the chain â€”
      * it runs on the entity's next interaction tick.
      */
     private void probeHit(int hitNumber, int x, int y, int z) {
@@ -6273,7 +6273,7 @@ public class NPCController {
 
     /**
      * Hold the hoe with the most life left. {@code equipFarmItem("Tool_Hoe")} takes the
-     * FIRST id match, which can be a broken one — the exact failure that made every till
+     * FIRST id match, which can be a broken one â€” the exact failure that made every till
      * a silent no-op.
      */
     private boolean equipBestHoe() {
@@ -6876,7 +6876,7 @@ public class NPCController {
             LayaPlugin.log("blocks.json loaded: " + HINT_PATTERNS.size() + " hints, "
                 + BLOCK_NAMES.size() + " block names");
         } catch (Exception e) {
-            LayaPlugin.log("blocks.json not loaded (" + e.getMessage() + ") — block names/hints unavailable");
+            LayaPlugin.log("blocks.json not loaded (" + e.getMessage() + ") â€” block names/hints unavailable");
         }
     }
 

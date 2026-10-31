@@ -380,6 +380,17 @@ public class CombatController {
     private String itemAnimLoggedFor = null;
     private long nextAmmoNoticeMs = 0;
     private String lastShieldLogged = null;
+    private String abilityParticleId = null;
+    private boolean abilityParticleResolved = false;
+    private boolean particleErrorLogged = false;
+    private java.util.Map<String, ?> particleSystems = null;
+    private final java.util.Map<String, String> abilityEffects = new java.util.HashMap<>();
+    private String abilitySoundId = null;
+    private boolean abilitySoundResolved = false;
+    private java.util.Map<String, ?> soundEvents = null;
+    private final java.util.Map<String, String> abilitySounds = new java.util.HashMap<>();
+    /** 0.4.4: next re-assert of the offhand shield while defending. */
+    private long nextShieldCheckMs = 0;
 
     /**
      * The spot a "stay here" pinned her to. World-thread only. Written by
@@ -631,6 +642,30 @@ public class CombatController {
         if (drawWeaponPending) {
             drawWeaponPending = false;
             ensureWeaponEquipped(now);
+        }
+
+        // 0.4.4: the client can drop the offhand render after a weapon swap, so while
+        // defending the shield slot is re-asserted every 2 s instead of vanishing.
+        if ("defend".equals(stance) && "melee".equals(combatMode) && now >= nextShieldCheckMs) {
+            nextShieldCheckMs = now + 2000;
+            try {
+                Inventory inv = owner.npcEntity == null ? null : owner.npcEntity.getInventory();
+                if (inv != null) {
+                    if (!hasShieldWorn()) {
+                        defendLoadout(inv);
+                    } else if (owner.layaRef != null && owner.worldStore != null) {
+                        InventoryComponent.Utility util = owner.worldStore.getComponent(
+                            owner.layaRef, InventoryComponent.Utility.getComponentType());
+                        if (util != null) {
+                            if (util.getActiveSlot() != 0) {
+                                util.setActiveSlot((byte) 0, owner.layaRef, owner.worldStore);
+                            }
+                            util.setOutdatedEquipment(true);
+                        }
+                    }
+                }
+            } catch (Throwable ignored) {
+            }
         }
 
         // (1) A live reactive stamp becomes the target (any stance; spec section 2).
@@ -1444,8 +1479,13 @@ public class CombatController {
 
     /** 0.4.4: the first preferred animation name the held item actually defines, or null. */
     private String itemAnimation(String... preference) {
+        return animationFrom(wieldedStack(), preference);
+    }
+
+    /** The first preferred animation name {@code stack}'s item defines, or null. */
+    private String animationFrom(ItemStack stack, String... preference) {
         try {
-            Item item = wieldedStack() == null ? null : wieldedStack().getItem();
+            Item item = stack == null ? null : stack.getItem();
             String animId = item == null ? null : item.getPlayerAnimationsId();
             ItemPlayerAnimations anims = animId == null ? null
                 : ItemPlayerAnimations.getAssetMap().getAsset(animId);
@@ -1498,6 +1538,367 @@ public class CombatController {
             LayaPlugin.log("Combat: arrow use failed: " + t);
         }
         return false;
+    }
+
+    /**
+     * 0.4.4: one weapon-class ability. Cooldown 0 means "no gate" (Guard Counter only
+     * fires once per hit taken). Splash is a radius around the main target.
+     */
+    private static final class Ability {
+        final String name;
+        final float multiplier;
+        final long cooldownMs;
+        final double range;
+        final int extraTargets;
+        final double splashRadius;
+
+        Ability(String name, float multiplier, long cooldownMs, double range,
+                int extraTargets, double splashRadius) {
+            this.name = name;
+            this.multiplier = multiplier;
+            this.cooldownMs = cooldownMs;
+            this.range = range;
+            this.extraTargets = extraTargets;
+            this.splashRadius = splashRadius;
+        }
+    }
+
+    /** Daggers swing faster than other weapons; the rest keep the 1.1 s cadence. */
+    private static long swingInterval(String weaponId) {
+        return "dagger".equals(weaponClassOf(weaponId)) ? 700L : SWING_INTERVAL_MS;
+    }
+
+    /**
+     * 0.4.4: the ability the held weapon brings, per the plan's table. Stance still
+     * matters: Stay's counter and Defend's shield bash win over the weapon move.
+     */
+    private Ability chooseAbility(String weaponId) {
+        if ("stay".equals(stance) && counterReady) {
+            return new Ability("Guard Counter", 1.6f, 0L, SWING_RANGE, 0, 0.0);
+        }
+        if ("defend".equals(stance) && hasShieldWorn()) {
+            return new Ability("Shield Bash", 1.35f, 4500L, SWING_RANGE, 0, 0.0);
+        }
+        String cls = weaponClassOf(weaponId);
+        if (cls == null) {
+            return new Ability("Jab", 1.1f, 2000L, SWING_RANGE, 0, 0.0);
+        }
+        boolean twoHanded = isTwoHanded(weaponId);
+        return switch (cls) {
+            case "dagger" -> new Ability("Quick Stab", 1.8f, 2500L, SWING_RANGE, 0, 0.0);
+            case "axe" -> twoHanded
+                ? new Ability("Whirlwind", 1.4f, 7000L, SWING_RANGE + 0.5, 4, 3.5)
+                : new Ability("Cleave", 1.5f, 5000L, SWING_RANGE, 2, 2.5);
+            case "mace" -> new Ability("Crushing Blow", 1.6f, 6000L, SWING_RANGE, 0, 0.0);
+            case "spear" -> new Ability("Thrust", 1.3f, 4000L, 4.2, 0, 0.0);
+            default -> twoHanded
+                ? new Ability("Heavy Slash", 2.0f, 6000L, SWING_RANGE, 1, 2.2)
+                : new Ability("Power Strike", 1.9f, 4500L, SWING_RANGE, 0, 0.0);
+        };
+    }
+
+    /** True when a shield sits in the offhand slot. */
+    private boolean hasShieldWorn() {
+        try {
+            if (owner.npcEntity == null) return false;
+            Inventory inv = owner.npcEntity.getInventory();
+            ItemContainer util = inv == null ? null : inv.getUtility();
+            if (util == null || util.getCapacity() < 1) return false;
+            String id = idAt(util, (short) 0);
+            return id != null && isShield(id);
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    /** 0.4.4: defending with a shield up halves incoming damage. */
+    public boolean isShieldBlocking() {
+        return "defend".equals(stance) && hasShieldWorn();
+    }
+
+    /** Cleave / Whirlwind: damage the other NPCs around the main target. */
+    private void hitSplash(Ref<EntityStore> primary, float amount, int maxTargets, double radius) {
+        try {
+            Vector3d center = positionOf(primary);
+            if (center == null) return;
+            java.util.List<Ref<EntityStore>> candidates =
+                TargetUtil.getAllEntitiesInSphere(center, radius, owner.worldStore);
+            if (candidates == null) return;
+            int hits = 0;
+            for (Ref<EntityStore> c : candidates) {
+                if (hits >= maxTargets) break;
+                if (!isValidEntity(c) || isForbiddenTarget(c) || sameRef(c, primary)) continue;
+                if (hpOf(c) <= 0f) continue;
+                DamageSystems.executeDamage(c, owner.worldStore,
+                    new Damage(new Damage.EntitySource(owner.layaRef), DamageCause.PHYSICAL, amount));
+                hits++;
+                LayaPlugin.log("Combat: splash " + nameOf(c) + " dmg=" + trimDamage(amount)
+                    + " hp=" + trimDamage(Math.max(0f, hpOf(c))));
+            }
+        } catch (Throwable t) {
+            LayaPlugin.log("Combat: splash failed: " + t);
+        }
+    }
+
+    /** 0.4.4: an alternate animation from the held item's set for a named ability. */
+    private String abilityAnimation(String abilityName) {
+        String[] preference = switch (abilityName) {
+            case "Quick Stab" -> new String[]{"Stab", "SwingLeft", "SwingRight"};
+            case "Thrust" -> new String[]{"Stab", "SwingLeft", "SwingRight"};
+            case "Cleave", "Whirlwind", "Power Strike" ->
+                new String[]{"SwingLeftRight", "SwingLeft", "SwingRight"};
+            case "Crushing Blow" -> new String[]{"SwingLeftRight", "SwingLeft", "SwingDown"};
+            case "Heavy Slash" -> new String[]{"SwingDown", "SwingLeftRight", "SwingRight"};
+            case "Guard Counter" -> new String[]{"Guard", "SwingRight"};
+            case "Shield Bash" -> new String[]{"GuardBash", "ShieldBash", "Block", "Guard"};
+            default -> new String[]{"SwingLeftRight", "SwingLeft", "SwingRight"};
+        };
+        if ("Shield Bash".equals(abilityName)) {
+            // The sword's set has no shield move; the shield's own set does.
+            String fromShield = shieldAnimation(preference);
+            if (fromShield != null) return fromShield;
+        }
+        return itemAnimation(preference);
+    }
+
+    /** Animation names from the shield in her offhand, or null. */
+    private String shieldAnimation(String... preference) {
+        try {
+            if (owner.npcEntity == null) return null;
+            Inventory inv = owner.npcEntity.getInventory();
+            ItemContainer util = inv == null ? null : inv.getUtility();
+            if (util == null || util.getCapacity() < 1) return null;
+            ItemStack stack = util.getItemStack((short) 0);
+            return animationFrom(stack, preference);
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    /**
+     * 0.4.4: a visible burst on the target when an ability lands. The particle id is
+     * resolved from the installed packs once; with none found the damage still lands.
+     */
+    private void spawnAbilityEffect(Ref<EntityStore> target, String abilityName) {
+        String effectId = effectFor(abilityName);
+        if (effectId == null) return;
+        try {
+            Vector3d at = positionOf(target);
+            if (at == null) return;
+            Vector3d pos = new Vector3d(at.x, at.y + 1.0, at.z);
+            java.util.List<Ref<EntityStore>> viewers = new java.util.ArrayList<>();
+            if (owner.playerRef != null) {
+                Ref<EntityStore> pr = owner.playerRef.getReference();
+                if (pr != null) viewers.add(pr);
+            }
+            int rgb = abilityRgb(abilityName);
+            com.hypixel.hytale.protocol.Color color = new com.hypixel.hytale.protocol.Color(
+                (byte) ((rgb >> 16) & 0xFF), (byte) ((rgb >> 8) & 0xFF), (byte) (rgb & 0xFF));
+            if (!viewers.isEmpty()) {
+                // Three stacked bursts at 1.6x, because a single 1.0 burst is easy to miss.
+                for (int i = 0; i < 3; i++) {
+                    com.hypixel.hytale.server.core.universe.world.ParticleUtil.spawnParticleEffect(
+                        effectId, new Vector3d(pos.x, pos.y + i * 0.4, pos.z),
+                        0f, 0f, 0f, 1.6f, color, viewers, owner.worldStore);
+                }
+            } else {
+                com.hypixel.hytale.server.core.universe.world.ParticleUtil.spawnParticleEffect(
+                    effectId, pos, owner.worldStore);
+            }
+            playAbilitySound(abilityName);
+        } catch (Throwable t) {
+            if (!particleErrorLogged) {
+                particleErrorLogged = true;
+                LayaPlugin.log("Combat: ability effect failed: " + t);
+            }
+        }
+    }
+
+    /** 0.4.4: a hit sound for the special move, one per weapon class. */
+    private void playAbilitySound(String abilityName) {
+        if (!abilitySoundResolved) {
+            abilitySoundResolved = true;
+            try {
+                soundEvents = com.hypixel.hytale.server.core.asset.type.soundevent
+                    .config.SoundEvent.getAssetMap().getAssetMap();
+                LayaPlugin.log("Combat: " + soundEvents.size() + " sound events available");
+            } catch (Throwable t) {
+                LayaPlugin.log("Combat: sound lookup failed: " + t);
+                soundEvents = java.util.Collections.emptyMap();
+            }
+        }
+        String id = abilitySounds.get(abilityName);
+        if (id == null) {
+            id = pickSound(abilityName);
+            abilitySounds.put(abilityName, id == null ? "" : id);
+            LayaPlugin.log("Combat: sound for " + abilityName + " -> " + id);
+        }
+        if (id.isEmpty() || owner.playerRef == null) return;
+        try {
+            com.hypixel.hytale.server.core.universe.world.SoundUtil.playSoundEvent2dToPlayer(
+                owner.playerRef, id, com.hypixel.hytale.protocol.SoundCategory.SFX);
+        } catch (Throwable t) {
+            if (!particleErrorLogged) {
+                particleErrorLogged = true;
+                LayaPlugin.log("Combat: ability sound failed: " + t);
+            }
+        }
+    }
+
+    private String pickSound(String abilityName) {
+        String[] keys = switch (abilityName) {
+            case "Power Strike", "Heavy Slash" -> new String[]{"sword", "slash", "blade"};
+            case "Cleave", "Whirlwind" -> new String[]{"axe", "chop", "cleave"};
+            case "Crushing Blow" -> new String[]{"mace", "blunt", "club"};
+            case "Quick Stab" -> new String[]{"dagger", "stab", "knife"};
+            case "Thrust" -> new String[]{"spear", "stab", "thrust"};
+            case "Shield Bash" -> new String[]{"shield", "bash", "block"};
+            case "Guard Counter" -> new String[]{"parry", "block", "shield"};
+            default -> new String[]{"hit"};
+        };
+        for (String key : keys) {
+            for (String id : soundEvents.keySet()) {
+                if (id != null && id.toLowerCase().contains(key)) return id;
+            }
+        }
+        for (String fallback : new String[]{"hit", "impact", "swing"}) {
+            for (String id : soundEvents.keySet()) {
+                if (id != null && id.toLowerCase().contains(fallback)) return id;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * 0.4.4: a particle SYSTEM that suits the weapon, resolved from the installed list.
+     * The first "Impact*" entry happened to be Impact_Poison, which is why every hit was
+     * green; this looks for an impact effect that names the weapon class first.
+     */
+    private String effectFor(String abilityName) {
+        if (particleSystems == null) {
+            try {
+                particleSystems = com.hypixel.hytale.server.core.asset.type.particle.config.ParticleSystem
+                    .getAssetMap().getAssetMap();
+                LayaPlugin.log("Combat: " + particleSystems.size() + " particle systems available");
+            } catch (Throwable t) {
+                LayaPlugin.log("Combat: particle system lookup failed: " + t);
+                particleSystems = java.util.Collections.emptyMap();
+            }
+        }
+        String cacheKey = abilityName + "|"
+            + ("Shield Bash".equals(abilityName) ? shieldItemId() : currentWeaponId());
+        String cached = abilityEffects.get(cacheKey);
+        if (cached != null) return cached.isEmpty() ? null : cached;
+        String id = pickEffect(abilityName);
+        abilityEffects.put(cacheKey, id == null ? "" : id);
+        LayaPlugin.log("Combat: effect for " + cacheKey + " -> " + id);
+        return id;
+    }
+
+    /** A coloured impact system that matches the metal, or null. */
+    private String materialEffect(String abilityName) {
+        String id = "Shield Bash".equals(abilityName) ? shieldItemId() : currentWeaponId();
+        String s = id == null ? "" : id.toLowerCase();
+        String want;
+        if (s.contains("thorium")) want = "impact_poison";                       // green
+        else if (s.contains("cobalt") || s.contains("frost") || s.contains("ice")) want = "impact_ice"; // blue
+        else if (s.contains("adamant") || s.contains("flame") || s.contains("fire")) want = "impact_fire"; // red/orange
+        else if (s.contains("mithril") || s.contains("doom") || s.contains("obsidian")) want = "laser_impact";
+        else want = null;
+        if (want == null) return null;
+        for (String sid : particleSystems.keySet()) {
+            if (sid != null && sid.toLowerCase().startsWith(want)) return sid;
+        }
+        for (String sid : particleSystems.keySet()) {
+            if (sid != null && sid.toLowerCase().contains(want)) return sid;
+        }
+        return null;
+    }
+
+    private String pickEffect(String abilityName) {
+        // A material-themed system first: several impact systems carry their own colour
+        // and ignore the tint, so matching the metal gives a visible difference.
+        String material = materialEffect(abilityName);
+        if (material != null) return material;
+        String[] keys = switch (abilityName) {
+            case "Power Strike", "Heavy Slash", "Guard Counter" ->
+                new String[]{"impact_sword", "impact_longsword", "impact_battleaxe"};
+            case "Cleave" -> new String[]{"impact_axe", "impact_battleaxe", "impact_sword"};
+            case "Whirlwind" -> new String[]{"impact_battleaxe", "impact_axe", "impact_sword"};
+            case "Crushing Blow" -> new String[]{"impact_mace", "impact_club", "impact_sword"};
+            case "Quick Stab" -> new String[]{"impact_dagger", "impact_daggers", "impact_sword"};
+            case "Thrust" -> new String[]{"impact_spear", "impact_dagger", "impact_sword"};
+            case "Shield Bash" -> new String[]{"impact_shield", "impact_battleaxe", "impact_mace"};
+            default -> new String[]{"impact_sword"};
+        };
+        for (String want : keys) {
+            for (String id : particleSystems.keySet()) {
+                if (id != null && id.toLowerCase().startsWith(want)) return id;
+            }
+        }
+        for (String want : keys) {
+            String token = want.substring("impact_".length());
+            for (String id : particleSystems.keySet()) {
+                if (id == null) continue;
+                String low = id.toLowerCase();
+                if (low.contains("impact") && low.contains(token)) return id;
+            }
+        }
+        return null;
+    }
+
+    /** 0.4.4: the burst takes the colour of the item's material (cobalt blue, thorium green). */
+    private int abilityRgb(String abilityName) {
+        String id = "Shield Bash".equals(abilityName) ? shieldItemId() : currentWeaponId();
+        return materialRgb(id);
+    }
+
+    /** Colour of the material in an item id, or white when it is unknown. */
+    static int materialRgb(String id) {
+        if (id == null) return 0xFFFFFF;
+        String s = id.toLowerCase();
+        if (s.contains("thorium")) return 0x57C24A;     // thorium green
+        if (s.contains("cobalt")) return 0x3F74E0;      // cobalt blue
+        if (s.contains("mithril")) return 0x9B6BE0;     // mithril violet
+        if (s.contains("adamant")) return 0xD23B3B;     // adamantite red
+        if (s.contains("copper")) return 0xC97B3A;
+        if (s.contains("bronze")) return 0xB0793C;
+        if (s.contains("steel")) return 0x8FA3B8;
+        if (s.contains("iron")) return 0xB8BEC7;
+        if (s.contains("gold")) return 0xE8C24A;
+        if (s.contains("silver")) return 0xD8DEE8;
+        if (s.contains("frost") || s.contains("ice")) return 0x8FD8FF;
+        if (s.contains("flame") || s.contains("fire")) return 0xFF7A3A;
+        if (s.contains("doom")) return 0x6B4A8A;
+        if (s.contains("obsidian")) return 0x4A3A5C;
+        if (s.contains("bone")) return 0xE8E0C8;
+        if (s.contains("wood") || s.contains("crude")) return 0x9C8A6A;
+        return 0xFFFFFF;
+    }
+
+    /** The shield id in the offhand, or null. */
+    private String shieldItemId() {
+        try {
+            if (owner.npcEntity == null) return null;
+            Inventory inv = owner.npcEntity.getInventory();
+            ItemContainer util = inv == null ? null : inv.getUtility();
+            if (util == null || util.getCapacity() < 1) return null;
+            return idAt(util, (short) 0);
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    /** Up to twelve "impact" spawner ids, so a better effect can be chosen from the log. */
+    private static String impactIds(java.util.Map<String, ?> map) {
+        StringBuilder sb = new StringBuilder();
+        int n = 0;
+        for (String id : map.keySet()) {
+            if (id == null || !id.toLowerCase().contains("impact")) continue;
+            if (n++ >= 12) break;
+            sb.append(id).append(", ");
+        }
+        return sb.length() == 0 ? "none" : sb.toString();
     }
 
     /** Regen staff mana on the world clock, capped at 100. */
@@ -1923,6 +2324,8 @@ public class CombatController {
         try {
             WeaponRef shield = findBestShield(inv);
             if (shield == null) return false;
+            boolean alreadyPlaced = shield.container == inv.getUtility() && shield.slot == 0
+                && lastShieldLogged != null && lastShieldLogged.equals(shield.id);
             if (!placeShieldInOffhand(inv, shield)) {
                 LayaPlugin.log("Combat: shield could not reach the offhand");
                 return false;
@@ -1935,7 +2338,10 @@ public class CombatController {
                     util.setOutdatedEquipment(true);   // forces the left-hand sync
                 }
             }
-            LayaPlugin.log("Combat: shield " + shield.id + " -> offhand");
+            if (!alreadyPlaced) {
+                LayaPlugin.log("Combat: shield " + shield.id + " -> offhand");
+            }
+            lastShieldLogged = shield.id;
             return true;
         } catch (Throwable t) {
             LayaPlugin.log("Combat: defend loadout threw: " + t);
@@ -2556,9 +2962,8 @@ public class CombatController {
         if (now < nextSwingMs) return;
         if (owner.npcEntity == null || owner.layaRef == null || owner.worldStore == null) return;
         if (target == null) return;
-        nextSwingMs = now + SWING_INTERVAL_MS;
-
         String weaponId = currentWeaponId();
+        nextSwingMs = now + swingInterval(weaponId);
 
         // Check BEFORE playing the swing: the old order played the animation first,
         // so she visibly swung at empty air while walking to a target out of reach.
@@ -2567,33 +2972,37 @@ public class CombatController {
             logSwingSkipOnce("Combat: swing skipped â€” target down");
             return;
         }
+        // 0.4.4: the weapon's own ability sets the reach (a spear stabs from farther).
+        Ability move = chooseAbility(weaponId);
+        double reach = move == null ? SWING_RANGE : move.range;
         double dist = distanceToLaya(target);
-        if (dist > SWING_RANGE) {
+        if (dist > reach) {
             logSwingSkipOnce("Combat: swing skipped â€” target "
-                + String.format("%.1f", dist) + " blocks away (reach " + trimDamage((float) SWING_RANGE) + ")");
+                + String.format("%.1f", dist) + " blocks away (reach " + trimDamage((float) reach) + ")");
             return;
         }
 
-        String anim = playSwingAnimation(weaponId);
+        String anim;
         float amount = damageForWeapon(weaponId);
-        // 0.4.4: one stance ability on a cooldown, riding the existing swing so the
-        // damage path and the animation stay the ones that already work.
-        String ability = null;
-        if (now >= nextAbilityMs) {
-            if ("attack".equals(stance)) {
-                ability = "Power Strike";
-                amount *= 1.9f;
-            } else if ("defend".equals(stance)) {
-                ability = "Shield Bash";
-                amount *= 1.35f;
-            } else if ("stay".equals(stance) && counterReady) {
-                ability = "Guard Counter";
-                amount *= 1.6f;
+        // 0.4.4: one weapon-class ability on its own cooldown, riding the swing that
+        // already works so the damage path and animation stay the tested ones.
+        boolean useAbility = move != null && now >= nextAbilityMs;
+        if (useAbility) {
+            amount *= move.multiplier;
+            nextAbilityMs = move.cooldownMs <= 0 ? 0 : now + move.cooldownMs;
+            counterReady = false;
+            // A distinct move from the item's own set, so the ability reads differently
+            // from the normal swing; the normal swing is only the fallback.
+            String special = abilityAnimation(move.name);
+            if (special != null) {
+                playAction(special, "ability " + move.name);
+                anim = special;
+            } else {
+                anim = playSwingAnimation(weaponId);
             }
-            if (ability != null) {
-                nextAbilityMs = now + ABILITY_COOLDOWN_MS;
-                counterReady = false;
-            }
+        } else {
+            amount = damageForWeapon(weaponId);
+            anim = playSwingAnimation(weaponId);
         }
         try {
             DamageSystems.executeDamage(target, owner.worldStore,
@@ -2603,9 +3012,13 @@ public class CombatController {
             return;
         }
         swingCount++;
-        if (ability != null) {
-            LayaPlugin.log("Combat: ability " + ability + " at " + nameOf(target)
+        if (useAbility) {
+            LayaPlugin.log("Combat: ability " + move.name + " at " + nameOf(target)
                 + " dmg=" + trimDamage(amount) + " hp=" + trimDamage(Math.max(0f, hpOf(target))));
+            spawnAbilityEffect(target, move.name);
+            if (move.extraTargets > 0 && move.splashRadius > 0.0) {
+                hitSplash(target, amount * 0.7f, move.extraTargets, move.splashRadius);
+            }
         } else {
             LayaPlugin.log("Combat: swing " + swingCount + " at " + nameOf(target)
                 + " dmg=" + trimDamage(amount) + " hp=" + trimDamage(Math.max(0f, hpOf(target))));

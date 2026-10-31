@@ -11,7 +11,7 @@
   "DefaultPlayerAttitude": "Neutral",
   "Appearance": "Player",
   "MaxHealth": 100,
-  "InventorySize": 28,
+  "InventorySize": 36,
   "HotbarSize": 8,
   "OffHandSlots": 4,
   "DisableDamageGroups": [ "Self" ],

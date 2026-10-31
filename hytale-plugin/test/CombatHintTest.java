@@ -37,6 +37,42 @@ public final class CombatHintTest {
         match("raccoon", "racoon", true);
         match("squirrel", "spider", false);
 
+        // 0.4.4: the hint the bridge sends is the noun, but it can carry filler.
+        matchRole("Rabbit", "rabbit", true);
+        matchRole("Rabbit_White", "rabbit", true);
+        matchRole("Rabbit_Wild", "the rabbit", true);
+        matchRole("Rabbit", "kill that rabbit", true);
+        matchRole("Chicken", "rabbit", false);
+        matchRole("Bunny", "rabbit", false);
+
+        // 0.4.4: combat mode families decide what "ranged" and "magic" equip.
+        family("Weapon_Sword_Iron", "melee");
+        family("Weapon_Battleaxe_Steel", "melee");
+        family("Weapon_Bow_Short", "ranged");
+        family("Weapon_Crossbow_Basic", "ranged");
+        family("Weapon_Staff_Wood", "magic");
+        family("Weapon_Staff_Frost", "magic");
+        family("Weapon_Wand_Ember", "magic");
+        family("Weapon_Shield_Iron", null);
+        family("Tool_Pickaxe_Iron", null);
+
+        // 0.4.4: defend loadout rules.
+        check("isShield(Weapon_Shield_Iron)", CombatController.isShield("Weapon_Shield_Iron"), "false");
+        check("isShield(Weapon_Sword_Iron)", !CombatController.isShield("Weapon_Sword_Iron"), "true");
+        check("twoHanded(Battleaxe)", CombatController.isTwoHanded("Weapon_Battleaxe_Steel"), "false");
+        check("twoHanded(Longsword)", CombatController.isTwoHanded("Weapon_Longsword_Iron"), "false");
+        check("twoHanded(Sword)", !CombatController.isTwoHanded("Weapon_Sword_Iron"), "true");
+        check("twoHanded(Mace)", CombatController.isTwoHanded("Weapon_Mace_Iron"), "false");
+        check("twoHanded(Club)", CombatController.isTwoHanded("Weapon_Club_Iron"), "false");
+
+        // 0.4.4: ability burst colour follows the item material.
+        color("Weapon_Sword_Cobalt", 0x3F74E0);
+        color("Weapon_Daggers_Thorium", 0x57C24A);
+        color("Weapon_Staff_Mithril", 0x9B6BE0);
+        color("Weapon_Shield_Cobalt", 0x3F74E0);
+        color("Armor_Iron_Legs", 0xB8BEC7);
+        color("Weapon_Arrow_Crude", 0x9C8A6A);
+
         System.out.println(passed + " PASS, " + failed + " FAIL");
         if (failed > 0) System.exit(1);
     }
@@ -45,6 +81,24 @@ public final class CombatHintTest {
         boolean got = CombatController.hintTokenMatches(role, token);
         check("hintTokenMatches(" + role + ", " + token + ") == " + expected,
             got == expected, String.valueOf(got));
+    }
+
+    private static void matchRole(String role, String hint, boolean expected) {
+        boolean got = CombatController.hintMatchesRole(role.toLowerCase(), hint.toLowerCase());
+        check("hintMatchesRole(" + role + ", \"" + hint + "\") == " + expected,
+            got == expected, String.valueOf(got));
+    }
+
+    private static void family(String itemId, String expected) {
+        String got = CombatController.familyClassOf(itemId);
+        check("familyClassOf(" + itemId + ") == " + expected,
+            expected == null ? got == null : expected.equals(got), String.valueOf(got));
+    }
+
+    private static void color(String itemId, int expected) {
+        int got = CombatController.materialRgb(itemId);
+        check("materialRgb(" + itemId + ") == " + Integer.toHexString(expected),
+            got == expected, Integer.toHexString(got));
     }
 
     private static void check(String what, boolean ok, String got) {

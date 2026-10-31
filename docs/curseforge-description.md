@@ -74,6 +74,24 @@ harvest the carrots
 gather all that wheat
 ```
 
+## New in 0.4.5
+
+- **Every weapon has its own ability.** Dagger Quick Stab (x1.8, and daggers swing every
+  0.7 s), sword Power Strike, longsword Heavy Slash, axe Cleave (hits nearby enemies),
+  battleaxe Whirlwind, mace Crushing Blow, spear Thrust with longer reach, fists Jab. Each has
+  its own cooldown, then she swings normally until it is ready again.
+- **Abilities look and sound different.** Each plays an alternate move from the weapon's own
+  animation set, fires three stacked particle bursts, and plays a hit sound matched to the
+  weapon. Burst colour follows the metal: thorium green, cobalt blue, adamantite red, mithril
+  violet, frost cyan, flame orange.
+- **Defend got real.** The shield sits in her offhand beside a one-handed weapon, halves
+  incoming damage while it is up, and is re-asserted so it does not disappear mid-fight.
+- **Menu polish.** Eight more pack slots (36 storage), both packs are five rows of nine and
+  line up, Stack & Sort fills two cells, the stance row is centred, mana is HUD-only, and
+  display text uses the game's Lexend face.
+- **Fixes.** Shield Bash uses the shield's own animation and sound, the mace ability swings
+  sideways, and adamantite is red instead of teal.
+
 ## New in 0.4.4
 
 - **She is on the map.** Her marker follows her across chunks, uses her current name, and
@@ -109,18 +127,6 @@ gather all that wheat
   ore) and stopped-task lines.
 - **Auto-update**: the launcher (`start.bat`) and `install.bat` check GitHub and update the
   plugin and bridge files, with a backup of what they replace.
-
-## New in 0.4.2
-
-- **No more corpse farming.** Enemies drop their target the moment she goes down and keep
-  ignoring her body until she is back up.
-- **Wood orders stay wood.** "Chop this tree" always fells the tree and shows the axe on
-  the HUD, however the request is phrased.
-- **She reports the haul.** After chopping, mining, gathering, farming or harvesting she
-  gives the pack total and a short remark in her current personality, instead of one
-  fixed line.
-- **Faster turns when a provider is slow**, and a cleaner per-folder config so two
-  installs no longer share names or HUD settings.
 
 ## Links
 

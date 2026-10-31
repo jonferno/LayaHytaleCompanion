@@ -17,7 +17,7 @@ Group {
 
       Label #Title {
         Text: "Laya  |  Companion";
-        Style: (FontSize: 22, RenderBold: true, TextColor: #FFFFFF, HorizontalAlignment: Center);
+        Style: (FontSize: 22, RenderBold: true, FontName: "Secondary", TextColor: #FFFFFF, HorizontalAlignment: Center);
       }
 
       Label #Selection {
@@ -31,11 +31,11 @@ Group {
         LayoutMode: Center;
 
         Group #PlayerColumn {
-          Anchor: (Width: 540, Height: 310);
+          Anchor: (Width: 540, Height: 342);
           LayoutMode: Top;
           Label #PlayerLabel {
             Text: "Your Pack";
-            Style: (FontSize: 16, RenderBold: true, TextColor: #FFFFFF);
+            Style: (FontSize: 16, RenderBold: true, FontName: "Secondary", TextColor: #FFFFFF);
           }
 
           Group #PlayerRow0 {
@@ -615,7 +615,7 @@ Group {
           LayoutMode: Top;
           Label #LayaLabel {
             Text: "Laya's Pack";
-            Style: (FontSize: 16, RenderBold: true, TextColor: #FFFFFF);
+            Style: (FontSize: 16, RenderBold: true, FontName: "Secondary", TextColor: #FFFFFF);
           }
 
           Group #LayaRow0 {
@@ -1060,18 +1060,123 @@ Group {
               }
             }
 
-            Group #SortCell {
+            ItemSlotButton #Pack35 {
               Anchor: (Width: 58, Height: 58, Right: 2);
               Background: #243447;
 
+              ItemSlot #Pack35Icon {
+                Anchor: (Full: 0);
+                ShowQualityBackground: true;
+                ShowDurabilityBar: true;
+                ShowQuantity: true;
+              }
+            }
+
+
+
+          }
+
+
+          Group #LayaRow4 {
+            Anchor: (Height: 60);
+            LayoutMode: Left;
+
+            ItemSlotButton #Pack36 {
+              Anchor: (Width: 58, Height: 58, Right: 2);
+              Background: #243447;
+
+              ItemSlot #Pack36Icon {
+                Anchor: (Full: 0);
+                ShowQualityBackground: true;
+                ShowDurabilityBar: true;
+                ShowQuantity: true;
+              }
+            }
+
+            ItemSlotButton #Pack37 {
+              Anchor: (Width: 58, Height: 58, Right: 2);
+              Background: #243447;
+
+              ItemSlot #Pack37Icon {
+                Anchor: (Full: 0);
+                ShowQualityBackground: true;
+                ShowDurabilityBar: true;
+                ShowQuantity: true;
+              }
+            }
+
+            ItemSlotButton #Pack38 {
+              Anchor: (Width: 58, Height: 58, Right: 2);
+              Background: #243447;
+
+              ItemSlot #Pack38Icon {
+                Anchor: (Full: 0);
+                ShowQualityBackground: true;
+                ShowDurabilityBar: true;
+                ShowQuantity: true;
+              }
+            }
+
+            ItemSlotButton #Pack39 {
+              Anchor: (Width: 58, Height: 58, Right: 2);
+              Background: #243447;
+
+              ItemSlot #Pack39Icon {
+                Anchor: (Full: 0);
+                ShowQualityBackground: true;
+                ShowDurabilityBar: true;
+                ShowQuantity: true;
+              }
+            }
+
+            ItemSlotButton #Pack40 {
+              Anchor: (Width: 58, Height: 58, Right: 2);
+              Background: #243447;
+
+              ItemSlot #Pack40Icon {
+                Anchor: (Full: 0);
+                ShowQualityBackground: true;
+                ShowDurabilityBar: true;
+                ShowQuantity: true;
+              }
+            }
+
+            ItemSlotButton #Pack41 {
+              Anchor: (Width: 58, Height: 58, Right: 2);
+              Background: #243447;
+
+              ItemSlot #Pack41Icon {
+                Anchor: (Full: 0);
+                ShowQualityBackground: true;
+                ShowDurabilityBar: true;
+                ShowQuantity: true;
+              }
+            }
+
+            ItemSlotButton #Pack42 {
+              Anchor: (Width: 58, Height: 58, Right: 2);
+              Background: #243447;
+
+              ItemSlot #Pack42Icon {
+                Anchor: (Full: 0);
+                ShowQualityBackground: true;
+                ShowDurabilityBar: true;
+                ShowQuantity: true;
+              }
+            }
+
+            Group #SortCell {
+              Anchor: (Width: 116, Height: 58, Right: 2);
+              Background: #243447;
+
               Label #SortLine1 {
-                Anchor: (Width: 58, Height: 14, Top: 14);
+                Anchor: (Width: 116, Height: 14, Top: 14);
                 Text: "Stack";
                 Style: (FontSize: 12, RenderBold: true, TextColor: #FFFFFF, HorizontalAlignment: Center);
               }
 
               Label #SortLine2 {
-                Anchor: (Width: 58, Height: 13, Top: 29);
+                Anchor: (Width: 116, Height: 13, Top: 29);
                 Text: "& Sort";
                 Style: (FontSize: 10, TextColor: #DCE8F7, HorizontalAlignment: Center);
               }
@@ -1086,113 +1191,12 @@ Group {
                 );
               }
             }
-
           }
 
-        Group #CommandBar {
-          Anchor: (Top: 8, Height: 78);
-          LayoutMode: Left;
-
-          Group #BoxFollow {
-            Anchor: (Width: 70, Height: 70, Right: 10);
-            Background: #1A2030(0.95);
-            Padding: (Full: 7);
-
-            Button #BtnFollow {
-              Anchor: (Width: 56, Height: 56);
-              Style: (
-                Default: (Background: (TexturePath: "LayaIcons/IconFollow.png", Color: #FFFFFF(0.82))),
-                Hovered: (Background: (TexturePath: "LayaIcons/IconFollow.png", Color: #FFFFFF(1.0))),
-                Pressed: (Background: (TexturePath: "LayaIcons/IconFollow.png", Color: #8FB8FF(1.0))),
-                Sounds: $C.@ButtonSounds
-              );
-            }
-          }
-
-          Group #BoxStay {
-            Anchor: (Width: 70, Height: 70, Right: 10);
-            Background: #1A2030(0.95);
-            Padding: (Full: 7);
-
-            Button #BtnStay {
-              Anchor: (Width: 56, Height: 56);
-              Style: (
-                Default: (Background: (TexturePath: "LayaIcons/IconStay.png", Color: #FFFFFF(0.82))),
-                Hovered: (Background: (TexturePath: "LayaIcons/IconStay.png", Color: #FFFFFF(1.0))),
-                Pressed: (Background: (TexturePath: "LayaIcons/IconStay.png", Color: #8FB8FF(1.0))),
-                Sounds: $C.@ButtonSounds
-              );
-            }
-          }
-
-          Group #BoxAttack {
-            Anchor: (Width: 70, Height: 70, Right: 10);
-            Background: #1A2030(0.95);
-            Padding: (Full: 7);
-
-            Button #BtnAttack {
-              Anchor: (Width: 56, Height: 56);
-              Style: (
-                Default: (Background: (TexturePath: "LayaIcons/IconAttack.png", Color: #FFFFFF(0.82))),
-                Hovered: (Background: (TexturePath: "LayaIcons/IconAttack.png", Color: #FFFFFF(1.0))),
-                Pressed: (Background: (TexturePath: "LayaIcons/IconAttack.png", Color: #8FB8FF(1.0))),
-                Sounds: $C.@ButtonSounds
-              );
-            }
-          }
-
-          Group #BoxDefend {
-            Anchor: (Width: 70, Height: 70, Right: 10);
-            Background: #1A2030(0.95);
-            Padding: (Full: 7);
-
-            Button #BtnDefend {
-              Anchor: (Width: 56, Height: 56);
-              Style: (
-                Default: (Background: (TexturePath: "LayaIcons/IconDefend.png", Color: #FFFFFF(0.82))),
-                Hovered: (Background: (TexturePath: "LayaIcons/IconDefend.png", Color: #FFFFFF(1.0))),
-                Pressed: (Background: (TexturePath: "LayaIcons/IconDefend.png", Color: #8FB8FF(1.0))),
-                Sounds: $C.@ButtonSounds
-              );
-            }
-          }
-
-          Group #BoxRanged {
-            Anchor: (Width: 70, Height: 70, Right: 10);
-            Background: #1A2030(0.95);
-            Padding: (Full: 7);
-
-            Button #BtnRanged {
-              Anchor: (Width: 56, Height: 56);
-              Style: (
-                Default: (Background: (TexturePath: "LayaIcons/IconRanged.png", Color: #FFFFFF(0.82))),
-                Hovered: (Background: (TexturePath: "LayaIcons/IconRanged.png", Color: #FFFFFF(1.0))),
-                Pressed: (Background: (TexturePath: "LayaIcons/IconRanged.png", Color: #8FB8FF(1.0))),
-                Sounds: $C.@ButtonSounds
-              );
-            }
-          }
-
-          Group #BoxMagic {
-            Anchor: (Width: 70, Height: 70);
-            Background: #1A2030(0.95);
-            Padding: (Full: 7);
-
-            Button #BtnMagic {
-              Anchor: (Width: 56, Height: 56);
-              Style: (
-                Default: (Background: (TexturePath: "LayaIcons/IconMagic.png", Color: #FFFFFF(0.82))),
-                Hovered: (Background: (TexturePath: "LayaIcons/IconMagic.png", Color: #FFFFFF(1.0))),
-                Pressed: (Background: (TexturePath: "LayaIcons/IconMagic.png", Color: #8FB8FF(1.0))),
-                Sounds: $C.@ButtonSounds
-              );
-            }
-          }
-        }
         }
 
         Group #GearPanel {
-          Anchor: (Width: 150, Height: 310, Left: 10);
+          Anchor: (Width: 150, Height: 342, Left: 10);
           Background: #243447(0.85);
           Padding: (Full: 8);
           LayoutMode: Top;
@@ -1200,7 +1204,7 @@ Group {
           Label #GearLabel {
             Anchor: (Width: 134, Height: 16);
             Text: "Equipped";
-            Style: (FontSize: 15, RenderBold: true, TextColor: #FFFFFF, HorizontalAlignment: Center);
+            Style: (FontSize: 15, RenderBold: true, FontName: "Secondary", TextColor: #FFFFFF, HorizontalAlignment: Center);
           }
 
           Group #GearRowWeapon {
@@ -1356,10 +1360,111 @@ Group {
       }
 
 
+
+      Group #CommandBar {
+        Anchor: (Left: 0, Right: 0, Top: 8, Height: 78);
+        LayoutMode: Center;
+
+        Group #BoxFollow {
+          Anchor: (Width: 70, Height: 70, Right: 10);
+          Background: #1A2030(0.95);
+          Padding: (Full: 7);
+
+          Button #BtnFollow {
+            Anchor: (Width: 56, Height: 56);
+            Style: (
+              Default: (Background: (TexturePath: "LayaIcons/IconFollow.png", Color: #FFFFFF(0.82))),
+              Hovered: (Background: (TexturePath: "LayaIcons/IconFollow.png", Color: #FFFFFF(1.0))),
+              Pressed: (Background: (TexturePath: "LayaIcons/IconFollow.png", Color: #8FB8FF(1.0))),
+              Sounds: $C.@ButtonSounds
+            );
+          }
+        }
+
+        Group #BoxStay {
+          Anchor: (Width: 70, Height: 70, Right: 10);
+          Background: #1A2030(0.95);
+          Padding: (Full: 7);
+
+          Button #BtnStay {
+            Anchor: (Width: 56, Height: 56);
+            Style: (
+              Default: (Background: (TexturePath: "LayaIcons/IconStay.png", Color: #FFFFFF(0.82))),
+              Hovered: (Background: (TexturePath: "LayaIcons/IconStay.png", Color: #FFFFFF(1.0))),
+              Pressed: (Background: (TexturePath: "LayaIcons/IconStay.png", Color: #8FB8FF(1.0))),
+              Sounds: $C.@ButtonSounds
+            );
+          }
+        }
+
+        Group #BoxAttack {
+          Anchor: (Width: 70, Height: 70, Right: 10);
+          Background: #1A2030(0.95);
+          Padding: (Full: 7);
+
+          Button #BtnAttack {
+            Anchor: (Width: 56, Height: 56);
+            Style: (
+              Default: (Background: (TexturePath: "LayaIcons/IconAttack.png", Color: #FFFFFF(0.82))),
+              Hovered: (Background: (TexturePath: "LayaIcons/IconAttack.png", Color: #FFFFFF(1.0))),
+              Pressed: (Background: (TexturePath: "LayaIcons/IconAttack.png", Color: #8FB8FF(1.0))),
+              Sounds: $C.@ButtonSounds
+            );
+          }
+        }
+
+        Group #BoxDefend {
+          Anchor: (Width: 70, Height: 70, Right: 10);
+          Background: #1A2030(0.95);
+          Padding: (Full: 7);
+
+          Button #BtnDefend {
+            Anchor: (Width: 56, Height: 56);
+            Style: (
+              Default: (Background: (TexturePath: "LayaIcons/IconDefend.png", Color: #FFFFFF(0.82))),
+              Hovered: (Background: (TexturePath: "LayaIcons/IconDefend.png", Color: #FFFFFF(1.0))),
+              Pressed: (Background: (TexturePath: "LayaIcons/IconDefend.png", Color: #8FB8FF(1.0))),
+              Sounds: $C.@ButtonSounds
+            );
+          }
+        }
+
+        Group #BoxRanged {
+          Anchor: (Width: 70, Height: 70, Right: 10);
+          Background: #1A2030(0.95);
+          Padding: (Full: 7);
+
+          Button #BtnRanged {
+            Anchor: (Width: 56, Height: 56);
+            Style: (
+              Default: (Background: (TexturePath: "LayaIcons/IconRanged.png", Color: #FFFFFF(0.82))),
+              Hovered: (Background: (TexturePath: "LayaIcons/IconRanged.png", Color: #FFFFFF(1.0))),
+              Pressed: (Background: (TexturePath: "LayaIcons/IconRanged.png", Color: #8FB8FF(1.0))),
+              Sounds: $C.@ButtonSounds
+            );
+          }
+        }
+
+        Group #BoxMagic {
+          Anchor: (Width: 70, Height: 70);
+          Background: #1A2030(0.95);
+          Padding: (Full: 7);
+
+          Button #BtnMagic {
+            Anchor: (Width: 56, Height: 56);
+            Style: (
+              Default: (Background: (TexturePath: "LayaIcons/IconMagic.png", Color: #FFFFFF(0.82))),
+              Hovered: (Background: (TexturePath: "LayaIcons/IconMagic.png", Color: #FFFFFF(1.0))),
+              Pressed: (Background: (TexturePath: "LayaIcons/IconMagic.png", Color: #8FB8FF(1.0))),
+              Sounds: $C.@ButtonSounds
+            );
+          }
+        }
+      }
       Label #CommandStatus {
-        Anchor: (Left: 568, Top: 8, Width: 470);
-        Text: "Stance: follow     Mode: melee     Mana: 100%";
-        Style: (FontSize: 14, TextColor: #D2D9E2, HorizontalAlignment: Center);
+        Anchor: (Left: 0, Right: 0, Top: 8);
+        Text: "Stance: follow     Mode: melee";
+        Style: (FontSize: 14, FontName: "Secondary", TextColor: #D2D9E2, HorizontalAlignment: Center);
       }
     }
   }
